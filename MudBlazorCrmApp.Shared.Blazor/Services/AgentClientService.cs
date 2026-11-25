@@ -437,7 +437,11 @@ public sealed class AgentClientService(
 
     private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
     private void NotifyChanged() => OnStateChanged?.Invoke();
-    public void Dispose() => _cts?.Dispose();
+    public void Dispose()
+    {
+        Stop();
+        _cts?.Dispose();
+    }
 
     public sealed record AgentChatEntry(string Kind, string Text);
 

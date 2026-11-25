@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
 public enum AgentMode
@@ -42,11 +44,11 @@ public sealed class AgentPermissionGate
         if (_declined.Contains(scopeKey))
             return (false, $"User previously declined '{actionText}'. Do not retry.");
 
-        // Destructive actions ALWAYS require confirmation unless Auto mode AND targetName is verified on screen
-        if (risk == "destructive" && (string.IsNullOrWhiteSpace(targetName) || !snapshotJson.Contains(targetName.Trim(), StringComparison.OrdinalIgnoreCase)))
+        // Destructive actions ALWAYS require confirmation and a verified targetName present in screen content
+        if (risk == "destructive" && (string.IsNullOrWhiteSpace(targetName) || !SnapshotContainsTarget(snapshotJson, targetName)))
             return (false, "Destructive action requires an explicit targetName present on screen.");
 
-        var effectiveRisk = risk == "confirm" && inDialog ? "save" : risk;
+        var effectiveRisk = risk == "confirm" ? "save" : risk;
         var needsPrompt = effectiveRisk switch
         {
             "destructive" => true, // Never auto-approve destructive actions without explicit user confirmation
@@ -69,5 +71,44 @@ public sealed class AgentPermissionGate
             _alwaysAllowed.Add(scopeKey);
 
         return (true, null);
+    }
+
+    private static bool SnapshotContainsTarget(string snapshotJson, string targetName)
+    {
+        var q = targetName.Trim();
+        try
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String &&
+                (t.GetString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("fields", out var fields) && fields.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var f in fields.EnumerateArray())
+                {
+                    if (f.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String &&
+                        (v.GetString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+
+            if (root.TryGetProperty("grids", out var grids) && grids.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var g in grids.EnumerateArray())
+                {
+                    if (!g.TryGetProperty("rows", out var rows) || rows.ValueKind != JsonValueKind.Array) continue;
+                    foreach (var r in rows.EnumerateArray())
+                    {
+                        if (!r.TryGetProperty("cells", out var cells) || cells.ValueKind != JsonValueKind.Array) continue;
+                        if (cells.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && (c.GetString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)))
+                            return true;
+                    }
+                }
+            }
+        }
+        catch (JsonException) { return false; }
+        return false;
     }
 }

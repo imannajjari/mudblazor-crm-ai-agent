@@ -13,10 +13,12 @@ public interface IAgentDataReader
     Task<string> ReadAsync(JsonElement args, CancellationToken ct);
 }
 
+public sealed record HelpSearchHit(string Title, string Content, int Score);
+
 public interface IAgentHelpCatalog
 {
-    List<AgentHelpService.HelpSearchHit> Search(string query, int maxResults = 3);
-    AgentHelpService.HelpSearchHit? GetPage(string titleQuery);
+    List<HelpSearchHit> Search(string query, int maxResults = 3);
+    HelpSearchHit? GetPage(string titleQuery);
 }
 
 public interface IServerToolHandler
@@ -29,12 +31,13 @@ public sealed class MemoryCacheRateLimiter(IMemoryCache cache) : IAgentRateLimit
 {
     public bool TryAcquire(string userKey, int limitPerMinute)
     {
-        var queue = cache.GetOrCreate($"agent_rl:{userKey}", entry =>
+        var lazyQueue = cache.GetOrCreate($"agent_rl:{userKey}", entry =>
         {
             entry.SlidingExpiration = TimeSpan.FromMinutes(5);
-            return new Queue<DateTimeOffset>();
+            return new Lazy<Queue<DateTimeOffset>>(() => new Queue<DateTimeOffset>());
         })!;
 
+        var queue = lazyQueue.Value;
         var now = DateTimeOffset.UtcNow;
         var cutoff = now.AddMinutes(-1);
         lock (queue)

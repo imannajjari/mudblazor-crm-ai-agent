@@ -96,5 +96,4 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
     }
 
     public sealed record HelpSection(string Title, string Content, HashSet<string> Tokens);
-    public sealed record HelpSearchHit(string Title, string Content, int Score);
 }

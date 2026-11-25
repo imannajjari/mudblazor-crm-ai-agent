@@ -219,9 +219,15 @@ public sealed class AgentService(
             catch (JsonException) { return false; }
 
             if (node is not JsonObject obj) return false;
-            var role = obj["role"]?.GetValue<string>();
+            var roleNode = obj["role"];
+            var role = roleNode is JsonValue rv && rv.TryGetValue<string>(out var rs) ? rs : null;
             if (role is not ("user" or "assistant" or "tool")) return false;
-            if (role == "tool" && string.IsNullOrWhiteSpace(obj["tool_call_id"]?.GetValue<string>())) return false;
+            if (role == "tool")
+            {
+                var idNode = obj["tool_call_id"];
+                var idStr = idNode is JsonValue iv && iv.TryGetValue<string>(out var ids) ? ids : null;
+                if (string.IsNullOrWhiteSpace(idStr)) return false;
+            }
             parsed.Add(obj);
         }
         return true;

@@ -57,9 +57,11 @@ public sealed class AgentUiToolDispatcher(
             return (JsonSerializer.Serialize(new { ok = false, error = "Invalid JSON tool arguments." }), false, null, currentSnapshotJson);
         }
 
-        using var _ = argsDoc;
+        using var docScope = argsDoc;
         var args = argsDoc.RootElement;
 
+        try
+        {
         switch (name)
         {
             case "scan_screen":
@@ -70,7 +72,7 @@ public sealed class AgentUiToolDispatcher(
             }
             case "go_to_page":
             {
-                var target = args.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                var target = GetArgString(args, "name");
                 var (route, available) = await ResolveRouteAsync(target, ct);
                 if (route == null)
                 {
@@ -83,15 +85,15 @@ public sealed class AgentUiToolDispatcher(
             }
             case "select_tab":
             {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var id = GetArgString(args, "id");
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectTab", ct, id);
                 var snap = await CaptureSnapshotAsync(ct);
                 return (JsonSerializer.Serialize(new { result = TryParseNode(res), snapshot = TryParseNode(snap) }), false, null, snap);
             }
             case "set_field":
             {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                var val = args.TryGetProperty("value", out var vEl) ? vEl.GetString() ?? "" : "";
+                var id = GetArgString(args, "id");
+                var val = GetArgString(args, "value");
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.setField", ct, id, val);
                 ledger.Add($"set_field({id} = \"{val}\")");
                 var snap = await CaptureSnapshotAsync(ct);
@@ -99,13 +101,13 @@ public sealed class AgentUiToolDispatcher(
             }
             case "open_combo":
             {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var id = GetArgString(args, "id");
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.openCombo", ct, id);
                 return (res, false, null, currentSnapshotJson);
             }
             case "pick_option":
             {
-                var opt = args.TryGetProperty("option", out var oEl) ? oEl.GetString() ?? "" : "";
+                var opt = GetArgString(args, "option");
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.pickOption", ct, opt);
                 ledger.Add($"pick_option(\"{opt}\")");
                 var snap = await CaptureSnapshotAsync(ct);
@@ -118,8 +120,8 @@ public sealed class AgentUiToolDispatcher(
             }
             case "click_action":
             {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                var targetName = args.TryGetProperty("targetName", out var tEl) ? tEl.GetString() : null;
+                var id = GetArgString(args, "id");
+                var targetName = GetArgString(args, "targetName");
                 var (route, wasInDialog) = ReadUrlAndDialog(currentSnapshotJson);
                 var (actionText, risk) = LookupAction(currentSnapshotJson, id);
 
@@ -138,20 +140,20 @@ public sealed class AgentUiToolDispatcher(
             }
             case "read_grid_headers":
             {
-                var find = args.TryGetProperty("find", out var fEl) ? fEl.GetString() : null;
+                var find = args.TryGetProperty("find", out _) ? GetArgString(args, "find") : null;
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.readGridHeaders", ct, find);
                 return (res, false, null, currentSnapshotJson);
             }
             case "select_grid_row":
             {
-                var rowId = args.TryGetProperty("rowId", out var rEl) ? rEl.GetString() ?? "" : "";
+                var rowId = GetArgString(args, "rowId");
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectGridRow", ct, rowId);
                 var snap = await CaptureSnapshotAsync(ct);
                 return (JsonSerializer.Serialize(new { result = TryParseNode(res), snapshot = TryParseNode(snap) }), false, null, snap);
             }
             case "look_at_screen":
             {
-                var question = args.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
+                var question = GetArgString(args, "question");
                 var visibleText = await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureVisibleText", ct);
                 var lookRes = await PostLookAsync(visibleText, question, ct);
                 if (lookRes?.Usage != null)
@@ -162,47 +164,75 @@ public sealed class AgentUiToolDispatcher(
             }
             case "lookup_term":
             {
-                var term = args.TryGetProperty("term", out var t) ? t.GetString() ?? "" : "";
+                var term = GetArgString(args, "term");
                 var (route, _) = await ResolveRouteAsync(term, ct);
                 return (JsonSerializer.Serialize(new { ok = true, term, mappedRoute = route, translated = appText[term] }), false, null, currentSnapshotJson);
             }
             case "ask_user":
             {
-                var question = args.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
+                var question = GetArgString(args, "question");
                 var answer = await askUserAsync(question, ct);
                 return (JsonSerializer.Serialize(new { ok = true, answer }), false, null, currentSnapshotJson);
             }
             case "finish":
             {
-                var summary = args.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
+                var summary = GetArgString(args, "summary");
                 return (JsonSerializer.Serialize(new { ok = true }), true, summary, currentSnapshotJson);
             }
             default:
                 return (JsonSerializer.Serialize(new { ok = false, error = $"Unknown tool '{name}'." }), false, null, currentSnapshotJson);
         }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "UI tool '{ToolName}' failed.", name);
+            return (JsonSerializer.Serialize(new { ok = false, error = ex.Message }), false, null, currentSnapshotJson);
+        }
+    }
+
+    private static string GetArgString(JsonElement args, string prop)
+    {
+        if (!args.TryGetProperty(prop, out var el)) return string.Empty;
+        return el.ValueKind switch
+        {
+            JsonValueKind.String => el.GetString() ?? string.Empty,
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => el.ToString(),
+            _ => string.Empty
+        };
+    }
+
+    private static string NormalizeRoutePath(string href)
+    {
+        var path = href.Split('?', '#')[0].Trim();
+        if (!path.StartsWith('/')) path = "/" + path;
+        return path.Length > 1 ? path.TrimEnd('/') : path;
     }
 
     private async Task<(string? Route, NavRouteDto[] Available)> ResolveRouteAsync(string input, CancellationToken ct)
     {
         var key = input.Trim();
-        var available = await GetNavRoutesAsync(ct);
+        var available = (await GetNavRoutesAsync(ct))
+            .Where(r => !BlockedRoutes.Contains(NormalizeRoutePath(r.Href)))
+            .ToArray();
         if (string.IsNullOrEmpty(key) || key.StartsWith("//")) return (null, available);
 
-        var normalizedPath = key.StartsWith('/') ? key : null;
-        if (normalizedPath != null && BlockedRoutes.Contains(normalizedPath))
+        if (key.StartsWith('/') && BlockedRoutes.Contains(NormalizeRoutePath(key)))
             return (null, available);
 
-        var exact = available.FirstOrDefault(r =>
-            string.Equals(r.Text, key, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(r.Href.TrimStart('/'), key.TrimStart('/'), StringComparison.OrdinalIgnoreCase) ||
-            (normalizedPath != null && string.Equals(r.Href, normalizedPath, StringComparison.OrdinalIgnoreCase)));
-        if (exact != null) return (exact.Href, available);
+        var match = available.FirstOrDefault(r =>
+                string.Equals(r.Text, key, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(r.Href.TrimStart('/'), key.TrimStart('/'), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(NormalizeRoutePath(r.Href), NormalizeRoutePath(key), StringComparison.OrdinalIgnoreCase))
+            ?? available.FirstOrDefault(r =>
+                r.Text.Contains(key, StringComparison.OrdinalIgnoreCase) ||
+                key.Contains(r.Text, StringComparison.OrdinalIgnoreCase) ||
+                r.Href.TrimStart('/').Contains(key.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
 
-        var partial = available.FirstOrDefault(r =>
-            r.Text.Contains(key, StringComparison.OrdinalIgnoreCase) ||
-            key.Contains(r.Text, StringComparison.OrdinalIgnoreCase) ||
-            r.Href.TrimStart('/').Contains(key.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
-        return (partial?.Href, available);
+        if (match == null || BlockedRoutes.Contains(NormalizeRoutePath(match.Href)))
+            return (null, available);
+
+        return (match.Href, available);
     }
 
     private async Task<NavRouteDto[]> GetNavRoutesAsync(CancellationToken ct)

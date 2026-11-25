@@ -262,6 +262,9 @@ window.crmAgentDriver = (function () {
         }
 
         const q = cleanText(String(optionTextOrIndex)).toLowerCase();
+        if (!q) {
+            return JSON.stringify({ ok: false, error: 'Option text or index is required.' });
+        }
         let match = items.find(i => cleanText(i.innerText).toLowerCase() === q);
         if (!match && (typeof optionTextOrIndex === 'number' || /^\d+$/.test(String(optionTextOrIndex)))) {
             const idx = Number(optionTextOrIndex) - 1;
@@ -337,7 +340,7 @@ window.crmAgentDriver = (function () {
     }
 
     function getNavRoutes() {
-        const blocked = new Set(['/logout', '/account/changepassword', '/login', '/register']);
+        const blocked = new Set(['/logout', '/account/changepassword', '/login', '/register', '/user']);
         const links = Array.from(document.querySelectorAll('.mud-nav-menu a.mud-nav-link'));
         const seen = new Set();
         const routes = [];

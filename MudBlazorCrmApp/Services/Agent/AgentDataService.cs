@@ -144,9 +144,13 @@ public sealed class AgentDataService(
             var raw = await res.Content.ReadAsStringAsync(ct);
             return ProjectResult(def, raw, skip, top);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { ok = false, error = ex.Message });
+            return JsonSerializer.Serialize(new { ok = false, error = "Loopback data request failed: " + ex.Message });
         }
     }
 
@@ -168,7 +172,16 @@ public sealed class AgentDataService(
             }
         }
 
-        using var doc = JsonDocument.Parse(rawJson);
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(rawJson);
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(new { ok = false, error = "Invalid JSON from OData endpoint." });
+        }
+        using var _ = doc;
         var root = doc.RootElement;
 
         int? totalCount = null;
