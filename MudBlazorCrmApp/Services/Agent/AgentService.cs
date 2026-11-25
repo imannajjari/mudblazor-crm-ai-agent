@@ -93,6 +93,7 @@ public sealed class AgentService(
             var llmResult = await provider.CompleteAsync(working, AgentToolSchemas.GetTools(), cancellationToken);
             sw.Stop();
             timings.Add($"llm {sw.ElapsedMilliseconds} ms");
+            ComputeCost(llmResult.Usage, options);
             AccumulateUsage(totalUsage, llmResult.Usage);
 
             if (llmResult.Error != null)
@@ -350,6 +351,7 @@ public sealed class AgentService(
         };
 
         var result = await provider.CompleteAsync(messages, tools: null, cancellationToken);
+        ComputeCost(result.Usage, options);
         if (result.Error != null)
         {
             return new AgentLookResponseModel
@@ -376,6 +378,21 @@ public sealed class AgentService(
         };
     }
 
+    private static void ComputeCost(AgentUsageModel usage, AgentOptions options)
+    {
+        if (!options.ShowCost || usage.Calls <= 0)
+        {
+            usage.Cost = null;
+            return;
+        }
+
+        var uncachedInput = Math.Max(0, usage.InputTokens - usage.CachedInputTokens);
+        var inputCost = (uncachedInput * options.InputPricePerMillionTokensUsd
+                         + usage.CachedInputTokens * (options.InputPricePerMillionTokensUsd * 0.25m)) / 1_000_000m;
+        var outputCost = usage.OutputTokens * options.OutputPricePerMillionTokensUsd / 1_000_000m;
+        usage.Cost = Math.Round(inputCost + outputCost, 6);
+    }
+
     private static void AccumulateUsage(AgentUsageModel total, AgentUsageModel add)
     {
         total.InputTokens += add.InputTokens;
@@ -386,7 +403,7 @@ public sealed class AgentService(
             total.Cost = (total.Cost ?? 0m) + add.Cost.Value;
     }
 
-    internal static bool TryParseMessages(IReadOnlyList<string>? rawMessages, out List<JsonObject> parsed)
+    public static bool TryParseMessages(IReadOnlyList<string>? rawMessages, out List<JsonObject> parsed)
     {
         parsed = [];
         if (rawMessages == null || rawMessages.Count == 0 || rawMessages.Count > MaxTranscriptMessages)

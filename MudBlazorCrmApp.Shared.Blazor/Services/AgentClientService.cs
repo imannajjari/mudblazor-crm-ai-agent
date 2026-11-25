@@ -122,9 +122,12 @@ public sealed class AgentClientService(
     public string? PendingPermissionRisk { get; private set; }
 
     public List<AgentChatEntry> Entries { get; } = [];
+    public List<AgentChatSummaryDto> SavedChats { get; private set; } = [];
+    public string CurrentChatKey { get; private set; } = NewChatKey();
     public int TotalCalls { get; private set; }
     public int TotalInputTokens { get; private set; }
     public int TotalOutputTokens { get; private set; }
+    public decimal TotalCost { get; private set; }
 
     private TaskCompletionSource<string>? _userAnswerTcs;
     private TaskCompletionSource<PermissionDecision>? _permissionTcs;
@@ -150,10 +153,12 @@ public sealed class AgentClientService(
     public void NewChat()
     {
         Stop();
+        CurrentChatKey = NewChatKey();
         Entries.Clear();
         TotalCalls = 0;
         TotalInputTokens = 0;
         TotalOutputTokens = 0;
+        TotalCost = 0m;
         WaitingForUserAnswer = false;
         PendingQuestion = null;
         WaitingForPermission = false;
@@ -163,6 +168,68 @@ public sealed class AgentClientService(
         _declinedActions.Clear();
         _ledger.Clear();
         NotifyChanged();
+    }
+
+    private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
+
+    public async Task LoadChatsAsync()
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "/api/agentchat");
+            await AttachBearerIfPresentAsync(req);
+            using var res = await httpClient.SendAsync(req);
+            if (!res.IsSuccessStatusCode) return;
+            var payload = await res.Content.ReadFromJsonAsync<AgentChatListDto>();
+            if (payload?.Chats != null)
+            {
+                SavedChats = payload.Chats;
+                NotifyChanged();
+            }
+        }
+        catch { }
+    }
+
+    public async Task LoadChatAsync(string chatKey)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/agentchat/{chatKey}");
+            await AttachBearerIfPresentAsync(req);
+            using var res = await httpClient.SendAsync(req);
+            if (!res.IsSuccessStatusCode) return;
+            var detail = await res.Content.ReadFromJsonAsync<AgentChatDetailDto>();
+            if (detail == null || string.IsNullOrEmpty(detail.ChatKey)) return;
+
+            Stop();
+            CurrentChatKey = detail.ChatKey;
+            Entries.Clear();
+            if (!string.IsNullOrWhiteSpace(detail.HistoryJson))
+            {
+                var loaded = JsonSerializer.Deserialize<List<AgentChatEntry>>(detail.HistoryJson);
+                if (loaded != null) Entries.AddRange(loaded);
+            }
+            TotalCalls = 0;
+            TotalInputTokens = 0;
+            TotalOutputTokens = 0;
+            TotalCost = 0m;
+            NotifyChanged();
+        }
+        catch { }
+    }
+
+    public async Task DeleteChatAsync(string chatKey)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Delete, $"/api/agentchat/{chatKey}");
+            await AttachBearerIfPresentAsync(req);
+            await httpClient.SendAsync(req);
+            SavedChats.RemoveAll(c => c.ChatKey == chatKey);
+            if (CurrentChatKey == chatKey) NewChat();
+            else NotifyChanged();
+        }
+        catch { }
     }
 
     public void Stop()
@@ -209,17 +276,19 @@ public sealed class AgentClientService(
         Entries.Add(new AgentChatEntry("user", goal));
         NotifyChanged();
 
+        var taskStart = DateTimeOffset.UtcNow;
+        var lastSummary = string.Empty;
+        var messages = new List<string>();
         try
         {
             _latestSnapshotJson = await CaptureSnapshotAsync();
-            var messages = new List<string>
-            {
+            messages.Add(
                 JsonSerializer.Serialize(new
                 {
                     role = "user",
                     content = $"Goal: {goal}\nDate: {DateTime.Now:yyyy-MM-dd}\nCurrent screen snapshot:\n{_latestSnapshotJson}"
                 })
-            };
+            );
 
             for (var step = 0; step < MaxSteps; step++)
             {
@@ -301,7 +370,8 @@ public sealed class AgentClientService(
 
                     if (isFinish)
                     {
-                        Entries.Add(new AgentChatEntry("assistant", AppendLedger(finishSummary ?? string.Empty)));
+                        lastSummary = AppendLedger(finishSummary ?? string.Empty);
+                        Entries.Add(new AgentChatEntry("assistant", lastSummary));
                         finished = true;
                         break;
                     }
@@ -330,7 +400,44 @@ public sealed class AgentClientService(
             _cts?.Dispose();
             _cts = null;
             NotifyChanged();
+            _ = SaveChatAndTaskAsync(goal, lastSummary, messages, (int)(DateTimeOffset.UtcNow - taskStart).TotalMilliseconds);
         }
+    }
+
+    private async Task SaveChatAndTaskAsync(string goal, string summary, List<string> messages, int durationMs)
+    {
+        try
+        {
+            var title = goal.Length > 80 ? goal[..80] : goal;
+            var historyJson = JsonSerializer.Serialize(Entries);
+            using var chatReq = new HttpRequestMessage(HttpMethod.Put, $"/api/agentchat/{CurrentChatKey}")
+            {
+                Content = JsonContent.Create(new { title, historyJson, logJson = "[]" })
+            };
+            await AttachBearerIfPresentAsync(chatReq);
+            await httpClient.SendAsync(chatReq);
+
+            var taskSeq = (int)Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeSeconds() % int.MaxValue);
+            using var taskReq = new HttpRequestMessage(HttpMethod.Put, $"/api/agentchat/{CurrentChatKey}/tasks/{taskSeq}")
+            {
+                Content = JsonContent.Create(new
+                {
+                    goal,
+                    summary,
+                    transcriptJson = JsonSerializer.Serialize(messages),
+                    inputTokens = TotalInputTokens,
+                    outputTokens = TotalOutputTokens,
+                    cachedInputTokens = 0,
+                    cost = TotalCost,
+                    modelCalls = TotalCalls,
+                    durationMs
+                })
+            };
+            await AttachBearerIfPresentAsync(taskReq);
+            await httpClient.SendAsync(taskReq);
+            await LoadChatsAsync();
+        }
+        catch { }
     }
 
     private async Task<(string ResultJson, bool IsFinish, string? Summary)> ExecuteUiToolAsync(
@@ -626,6 +733,7 @@ public sealed class AgentClientService(
         TotalCalls += usage.Calls;
         TotalInputTokens += usage.InputTokens;
         TotalOutputTokens += usage.OutputTokens;
+        if (usage.Cost.HasValue) TotalCost += usage.Cost.Value;
     }
 
     private static Dictionary<string, string> ParseServerToolResults(List<string>? rawResults)
@@ -677,6 +785,9 @@ public sealed class AgentClientService(
     }
 
     public sealed record AgentChatEntry(string Kind, string Text);
+    public sealed record AgentChatSummaryDto(string ChatKey, string Title, DateTime UpdatedDate);
+    private sealed record AgentChatListDto(List<AgentChatSummaryDto>? Chats);
+    private sealed record AgentChatDetailDto(string? ChatKey, string? Title, string? HistoryJson, string? LogJson);
 
     private sealed class AgentStatusDto
     {
@@ -704,5 +815,6 @@ public sealed class AgentClientService(
         public int InputTokens { get; set; }
         public int OutputTokens { get; set; }
         public int Calls { get; set; }
+        public decimal? Cost { get; set; }
     }
 }

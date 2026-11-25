@@ -85,7 +85,10 @@ public class AppText
         ["AGENT_THINKING"] = ("در حال بررسی...", "Thinking..."),
         ["AGENT_STOPPED"] = ("توسط کاربر متوقف شد.", "Stopped by user."),
         ["AGENT_EMPTY_STATE"] = ("می‌توانید درباره صفحه فعلی، جابه‌جایی بین بخش‌ها یا وضعیت CRM سوال بپرسید.", "Ask about the current screen, navigate between pages, or inspect CRM info."),
-        ["AGENT_STATS_FORMAT"] = ("فراخوانی: {0} | توکن ورودی: {1} | توکن خروجی: {2}", "Calls: {0} | Input: {1} | Output: {2}"),
+        ["AGENT_STATS_FORMAT"] = ("فراخوانی: {0} | ورودی: {1} | خروجی: {2}", "Calls: {0} | In: {1} | Out: {2}"),
+        ["AGENT_STATS_COST_FORMAT"] = (" | هزینه: ${0:0.0000}", " | Cost: ${0:0.0000}"),
+        ["AGENT_HISTORY"] = ("تاریخچه گفتگوها", "Chat History"),
+        ["AGENT_NO_HISTORY"] = ("گفتگوی ذخیره‌شده‌ای وجود ندارد", "No saved chats"),
         ["AGENT_ERROR_PREFIX"] = ("خطا: ", "Error: ")
     };
 

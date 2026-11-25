@@ -13,6 +13,9 @@ public class AgentOptions
     public int MaxTaskModelCalls { get; set; } = 40;
     public decimal MaxTaskCostUsd { get; set; } = 0.80m;
     public int TimeoutSeconds { get; set; } = 90;
+    public decimal InputPricePerMillionTokensUsd { get; set; } = 0.10m;
+    public decimal OutputPricePerMillionTokensUsd { get; set; } = 0.40m;
+    public bool ShowCost { get; set; } = true;
 
     /// <summary>
     /// Applies self-correcting bounds so invalid config values fall back to safe defaults.
