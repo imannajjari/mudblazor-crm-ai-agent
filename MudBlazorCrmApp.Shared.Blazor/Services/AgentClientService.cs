@@ -281,6 +281,20 @@ public sealed class AgentClientService(
         var messages = new List<string>();
         try
         {
+            // Include recent conversation history (user/assistant turns) so the agent remembers earlier tasks in this chat
+            var priorTurns = Entries
+                .Where(e => e.Kind is "user" or "assistant")
+                .TakeLast(10)
+                .ToList();
+            foreach (var turn in priorTurns)
+            {
+                messages.Add(JsonSerializer.Serialize(new
+                {
+                    role = turn.Kind,
+                    content = turn.Text
+                }));
+            }
+
             _latestSnapshotJson = await CaptureSnapshotAsync();
             messages.Add(
                 JsonSerializer.Serialize(new
@@ -561,10 +575,18 @@ public sealed class AgentClientService(
                     }
                 }
 
+                var wasInDialog = IsInDialog(_latestSnapshotJson);
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.clickAction", ct, id);
                 _ledger.Add($"click_action({actionText} [{risk}])");
                 _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
+                var (stillInDialog, hasErrors) = CheckDialogAndErrors(_latestSnapshotJson);
+                var saveDidNotComplete = risk == "save" && ((wasInDialog && stillInDialog) || hasErrors);
+                return (JsonSerializer.Serialize(new
+                {
+                    result = JsonNode.Parse(res),
+                    saveDidNotComplete,
+                    snapshot = JsonNode.Parse(_latestSnapshotJson)
+                }), false, null);
             }
 
             case "read_grid_headers":
@@ -660,6 +682,28 @@ public sealed class AgentClientService(
         }
         catch { }
         return (id, "save");
+    }
+
+    private static bool IsInDialog(string snapshotJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            return doc.RootElement.TryGetProperty("inDialog", out var el) && el.ValueKind == JsonValueKind.True;
+        }
+        catch { return false; }
+    }
+
+    private static (bool InDialog, bool HasErrors) CheckDialogAndErrors(string snapshotJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            var inDialog = doc.RootElement.TryGetProperty("inDialog", out var d) && d.ValueKind == JsonValueKind.True;
+            var hasErrors = doc.RootElement.TryGetProperty("errors", out var e) && e.ValueKind == JsonValueKind.Array && e.GetArrayLength() > 0;
+            return (inDialog, hasErrors);
+        }
+        catch { return (false, false); }
     }
 
     private string AppendLedger(string summary)

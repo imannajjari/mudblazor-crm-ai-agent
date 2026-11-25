@@ -207,6 +207,7 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: false, error: `Value exceeds maxLength (${input.maxLength}).` });
         }
 
+        input.focus();
         const nativeSetter = Object.getOwnPropertyDescriptor(
             input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
             'value'
