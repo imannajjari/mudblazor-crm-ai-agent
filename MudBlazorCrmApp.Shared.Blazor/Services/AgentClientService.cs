@@ -193,6 +193,7 @@ public sealed class AgentClientService(
         var lastSummary = string.Empty;
         try
         {
+            toolDispatcher.ResetSafety();
             var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
             messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, goal, snapshotJson);
             lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, ct);

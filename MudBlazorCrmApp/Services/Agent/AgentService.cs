@@ -10,7 +10,8 @@ public sealed class AgentService(
     IAgentRateLimiter rateLimiter,
     IEnumerable<IServerToolHandler> serverTools,
     IOptions<AgentOptions> optionsAccessor,
-    ILogger<AgentService> logger)
+    ILogger<AgentService> logger,
+    AgentHelpLlmAdvisor? helpAdvisor = null)
 {
     private const int MaxTranscriptMessages = 200;
     private const int MaxServerHops = 4;
@@ -36,80 +37,122 @@ public sealed class AgentService(
         if (!TryParseMessages(request.Messages, out var parsedMessages))
             return new AgentStepResponseModel { Error = "The conversation sent to the agent is not valid." };
 
+        var totalUsage = new AgentUsageModel();
+        var isHowTo = AgentServerGuard.IsHowToQuestion(parsedMessages);
+        var systemPrompt = await BuildSystemPromptWithAutoHelpAsync(parsedMessages, isHowTo, totalUsage, options, cancellationToken);
         var working = new List<JsonObject>(parsedMessages.Count + 1)
         {
-            new() { ["role"] = "system", ["content"] = AgentPrompts.MainSystemPrompt }
+            new() { ["role"] = "system", ["content"] = systemPrompt }
         };
         working.AddRange(parsedMessages);
 
         var prior = new List<string>();
         var timings = new List<string>();
-        var totalUsage = new AgentUsageModel();
         var guard = AgentServerGuard.FromTranscript(parsedMessages, _serverToolNames);
-        var isHowTo = AgentServerGuard.IsHowToQuestion(parsedMessages);
 
         for (var hop = 0; hop <= MaxServerHops; hop++)
         {
-            var isFinalCall = AgentServerGuard.ShouldForceFinalCall(working, request, options, totalUsage);
-            if (isFinalCall)
-            {
-                working.Add(new JsonObject
-                {
-                    ["role"] = "user",
-                    ["content"] = "[final call] Step/budget limit reached. Summarize what you have found or completed so far in plain text. Do not call any tools."
-                });
-            }
-
-            var tools = isFinalCall ? null : (isHowTo ? AgentToolSchemas.GetHowToTools() : AgentToolSchemas.GetTools());
-            var sw = Stopwatch.StartNew();
-            var llmResult = await provider.CompleteAsync(working, tools, cancellationToken);
-            sw.Stop();
-            timings.Add($"llm {sw.ElapsedMilliseconds} ms");
-            AgentCostCalculator.Compute(llmResult.Usage, options);
-            AgentCostCalculator.Accumulate(totalUsage, llmResult.Usage);
-
-            if (llmResult.Error != null)
-                return BuildError(prior, timings, totalUsage, options, llmResult.Error);
-
-            if (string.IsNullOrWhiteSpace(llmResult.AssistantJson))
-                return BuildError(prior, timings, totalUsage, options, "Assistant returned an empty response.");
-
-            JsonObject? assistantObj;
-            try
-            {
-                assistantObj = JsonNode.Parse(llmResult.AssistantJson)?.AsObject();
-            }
-            catch (JsonException ex)
-            {
-                logger.LogWarning(ex, "Invalid JSON returned by LLM provider.");
-                return BuildError(prior, timings, totalUsage, options, "Assistant returned invalid JSON.");
-            }
-            if (assistantObj == null)
-                return BuildError(prior, timings, totalUsage, options, "Assistant returned non-object JSON.");
-
-            var toolCalls = assistantObj["tool_calls"]?.AsArray();
-            if (isFinalCall || toolCalls == null || toolCalls.Count == 0)
-                return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
-
-            var hasServerTool = toolCalls.Any(tc => _serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
-            var hasUiTool = toolCalls.Any(tc => !_serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
-            if (!hasServerTool)
-                return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
-
-            var serverResults = await RunServerToolBatchAsync(toolCalls, guard, timings, cancellationToken);
-            if (hasUiTool || hop == MaxServerHops)
-                return BuildSuccess(llmResult.AssistantJson, prior, serverResults, timings, totalUsage, options);
-
-            working.Add(assistantObj);
-            prior.Add(llmResult.AssistantJson);
-            foreach (var resJson in serverResults)
-            {
-                working.Add(JsonNode.Parse(resJson)!.AsObject());
-                prior.Add(resJson);
-            }
+            var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, prior, timings, cancellationToken);
+            if (hopResult != null) return hopResult;
         }
 
         return BuildError(prior, timings, totalUsage, options, "Server tool hop limit reached.");
+    }
+
+    private async Task<string> BuildSystemPromptWithAutoHelpAsync(
+        IReadOnlyList<JsonObject> parsedMessages,
+        bool isHowTo,
+        AgentUsageModel totalUsage,
+        AgentOptions options,
+        CancellationToken ct)
+    {
+        if (!isHowTo || parsedMessages.Count != 1 || helpAdvisor == null)
+            return AgentPrompts.MainSystemPrompt;
+
+        var firstUserMsg = TryGetString(parsedMessages[0]["content"]) ?? "";
+        var (autoHelp, sideUsage) = await helpAdvisor.BuildAutoHelpContextAsync(firstUserMsg, ct);
+        AgentCostCalculator.Compute(sideUsage, options);
+        AgentCostCalculator.Accumulate(totalUsage, sideUsage);
+        return string.IsNullOrWhiteSpace(autoHelp)
+            ? AgentPrompts.MainSystemPrompt
+            : $"{AgentPrompts.MainSystemPrompt}\n\nRelevant CRM Guide Context (auto-retrieved):\n{autoHelp}";
+    }
+
+    private async Task<AgentStepResponseModel?> RunSingleHopAsync(
+        List<JsonObject> working,
+        AgentStepRequestModel request,
+        AgentOptions options,
+        AgentUsageModel totalUsage,
+        bool isHowTo,
+        int hop,
+        AgentServerGuard guard,
+        List<string> prior,
+        List<string> timings,
+        CancellationToken cancellationToken)
+    {
+        var isFinalCall = AgentServerGuard.ShouldForceFinalCall(working, request, options, totalUsage);
+        if (isFinalCall)
+        {
+            working.Add(new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = "[final call] Step/budget limit reached. Summarize what you have found or completed so far in plain text. Do not call any tools."
+            });
+        }
+
+        var tools = isFinalCall ? null : (isHowTo ? AgentToolSchemas.GetHowToTools() : AgentToolSchemas.GetTools());
+        var sw = Stopwatch.StartNew();
+        var llmResult = await provider.CompleteAsync(working, tools, cancellationToken);
+        sw.Stop();
+        timings.Add($"llm {sw.ElapsedMilliseconds} ms");
+        AgentCostCalculator.Compute(llmResult.Usage, options);
+        AgentCostCalculator.Accumulate(totalUsage, llmResult.Usage);
+
+        if (llmResult.Error != null) return BuildError(prior, timings, totalUsage, options, llmResult.Error);
+        if (string.IsNullOrWhiteSpace(llmResult.AssistantJson)) return BuildError(prior, timings, totalUsage, options, "Assistant returned an empty response.");
+
+        if (!TryParseAssistantObject(llmResult.AssistantJson, out var assistantObj, out var parseErr))
+            return BuildError(prior, timings, totalUsage, options, parseErr!);
+
+        var toolCalls = assistantObj!["tool_calls"]?.AsArray();
+        if (isFinalCall || toolCalls == null || toolCalls.Count == 0)
+            return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
+
+        var hasServerTool = toolCalls.Any(tc => _serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
+        var hasUiTool = toolCalls.Any(tc => !_serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
+        if (!hasServerTool)
+            return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
+
+        var serverResults = await RunServerToolBatchAsync(toolCalls, guard, timings, cancellationToken);
+        if (hasUiTool || hop == MaxServerHops)
+            return BuildSuccess(llmResult.AssistantJson, prior, serverResults, timings, totalUsage, options);
+
+        working.Add(assistantObj);
+        prior.Add(llmResult.AssistantJson);
+        foreach (var resJson in serverResults)
+        {
+            working.Add(JsonNode.Parse(resJson)!.AsObject());
+            prior.Add(resJson);
+        }
+        return null;
+    }
+
+    private bool TryParseAssistantObject(string json, out JsonObject? obj, out string? error)
+    {
+        obj = null;
+        error = null;
+        try
+        {
+            obj = JsonNode.Parse(json)?.AsObject();
+            if (obj == null) { error = "Assistant returned non-object JSON."; return false; }
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex, "Invalid JSON returned by LLM provider.");
+            error = "Assistant returned invalid JSON.";
+            return false;
+        }
     }
 
     private async Task<List<string>> RunServerToolBatchAsync(

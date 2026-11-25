@@ -94,7 +94,7 @@ window.crmAgentDriver = (function () {
                 kind: isSelect ? 'select' : (input.tagName === 'TEXTAREA' ? 'textarea' : (input.type || 'text')),
                 value: input.value || '',
                 maxLength: input.maxLength > 0 ? input.maxLength : null,
-                required: input.hasAttribute('required') || ctrl.classList.contains('mud-input-required'),
+                required: input.hasAttribute('required') || ctrl.classList.contains('mud-input-required') || input.getAttribute('aria-required') === 'true' || label.includes('*'),
                 invalid: ctrl.classList.contains('mud-input-error') || input.getAttribute('aria-invalid') === 'true',
                 // MudSelect renders a readonly inner input by design; only treat readOnly as disabled for non-select inputs
                 disabled: isSelect ? (ctrl.classList.contains('mud-disabled') || input.disabled) : (input.disabled || input.readOnly)
@@ -204,6 +204,21 @@ window.crmAgentDriver = (function () {
         return text.slice(0, 30000);
     }
 
+    function spotlightElement(el) {
+        if (!el || typeof el.scrollIntoView !== 'function') return;
+        try {
+            el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            const prevOutline = el.style.outline;
+            const prevShadow = el.style.boxShadow;
+            el.style.outline = '3px solid #594AE2';
+            el.style.boxShadow = '0 0 12px rgba(89, 74, 226, 0.55)';
+            setTimeout(() => {
+                el.style.outline = prevOutline;
+                el.style.boxShadow = prevShadow;
+            }, 900);
+        } catch { /* ignore visual highlight errors */ }
+    }
+
     async function setField(id, value) {
         const el = elementMap.get(id);
         if (!el || !document.contains(el)) {
@@ -223,6 +238,7 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: false, error: `Value exceeds maxLength (${input.maxLength}).` });
         }
 
+        spotlightElement(input);
         input.focus();
         const nativeSetter = Object.getOwnPropertyDescriptor(
             input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
@@ -305,6 +321,7 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: false, error: 'Action is disabled: ' + id });
         }
         const label = cleanText(el.innerText || el.getAttribute('title') || id);
+        spotlightElement(el);
         el.click();
         await waitForSettle(1500);
         return JSON.stringify({ ok: true, id, clicked: label });

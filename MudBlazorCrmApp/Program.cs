@@ -177,6 +177,7 @@ builder.Services.AddHttpClient("Loopback")
     });
 builder.Services.AddSingleton<IAgentRateLimiter, MemoryCacheRateLimiter>();
 builder.Services.AddSingleton<IAgentHelpCatalog, AgentHelpService>();
+builder.Services.AddScoped<AgentHelpLlmAdvisor>();
 builder.Services.AddScoped<IAgentDataReader, AgentDataService>();
 builder.Services.AddScoped<IServerToolHandler, ReadDataToolHandler>();
 builder.Services.AddScoped<IServerToolHandler, AskHelpToolHandler>();
@@ -248,38 +249,6 @@ using (var scope = app.Services.CreateScope())
     var ctx = services.GetRequiredService<ApplicationDbContext>();
 
     ctx.Database.Migrate();
-
-    ctx.Database.ExecuteSqlRaw("""
-        CREATE TABLE IF NOT EXISTS "AgentChat" (
-            "Id" INTEGER NOT NULL CONSTRAINT "PK_AgentChat" PRIMARY KEY AUTOINCREMENT,
-            "UserId" TEXT NOT NULL,
-            "ChatKey" TEXT NOT NULL,
-            "Title" TEXT NOT NULL,
-            "HistoryJson" TEXT NOT NULL,
-            "LogJson" TEXT NOT NULL,
-            "CreatedDate" TEXT NOT NULL,
-            "UpdatedDate" TEXT NOT NULL
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS "IX_AgentChat_UserId_ChatKey" ON "AgentChat" ("UserId", "ChatKey");
-        CREATE TABLE IF NOT EXISTS "AgentTask" (
-            "Id" INTEGER NOT NULL CONSTRAINT "PK_AgentTask" PRIMARY KEY AUTOINCREMENT,
-            "UserId" TEXT NOT NULL,
-            "ChatKey" TEXT NOT NULL,
-            "TaskSeq" INTEGER NOT NULL,
-            "Goal" TEXT NOT NULL,
-            "Summary" TEXT NOT NULL,
-            "TranscriptJson" TEXT NOT NULL,
-            "InputTokens" INTEGER NOT NULL,
-            "OutputTokens" INTEGER NOT NULL,
-            "CachedInputTokens" INTEGER NOT NULL,
-            "Cost" TEXT NOT NULL,
-            "ModelCalls" INTEGER NOT NULL,
-            "DurationMs" INTEGER NOT NULL,
-            "StartedDate" TEXT NOT NULL,
-            "CreatedDate" TEXT NOT NULL
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS "IX_AgentTask_UserId_ChatKey_TaskSeq" ON "AgentTask" ("UserId", "ChatKey", "TaskSeq");
-        """);
 
     // Seed only if no users exist (fresh database)
     var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();

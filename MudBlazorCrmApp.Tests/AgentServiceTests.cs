@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using MudBlazorCrmApp.Data;
 using MudBlazorCrmApp.Models;
 using MudBlazorCrmApp.Services.Agent;
@@ -178,5 +180,118 @@ public class AgentServiceTests
         Assert.Contains("&lt;script&gt;", html);
         Assert.Contains("<strong>۱۴</strong>", html);
         Assert.Contains("<code ", html);
+    }
+
+    [Fact]
+    public async Task AgentPermissionGate_EnforcesModesAndDestructiveConfirmation()
+    {
+        var gate = new AgentPermissionGate();
+        var promptCount = 0;
+        Task<PermissionDecision> AllowAlways(string _, string __, CancellationToken ___)
+        {
+            promptCount++;
+            return Task.FromResult(PermissionDecision.AllowAlways);
+        }
+
+        // Auto mode allows read/write/save without prompting, but still prompts for destructive
+        var (okSave, _) = await gate.AuthorizeAsync(AgentMode.Auto, "/Customer", true, "Save", "save", "", "{}", AllowAlways, CancellationToken.None);
+        Assert.True(okSave);
+        Assert.Equal(0, promptCount);
+
+        // Destructive without matching targetName in snapshot is blocked before prompting
+        var (okMissingTarget, reason) = await gate.AuthorizeAsync(AgentMode.Auto, "/Customer", false, "Delete", "destructive", "NonExistent", """{"fields":[],"grids":[]}""", AllowAlways, CancellationToken.None);
+        Assert.False(okMissingTarget);
+        Assert.Contains("targetName", reason);
+
+        // Destructive with matching targetName in snapshot prompts even in Auto mode
+        var (okDelete, _) = await gate.AuthorizeAsync(AgentMode.Auto, "/Customer", false, "Delete", "destructive", "Acme", """{"title":"Acme","fields":[],"grids":[]}""", AllowAlways, CancellationToken.None);
+        Assert.True(okDelete);
+        Assert.Equal(1, promptCount);
+    }
+
+    [Fact]
+    public void AgentUiToolDispatcher_MatchRoute_ResolvesSingularPluralAndBlocksAuthRoutes()
+    {
+        var routes = new[]
+        {
+            new NavRouteDto("/Customer", "شرکت‌ها / مشتریان"),
+            new NavRouteDto("/Lead", "سرنخ‌ها"),
+            new NavRouteDto("/logout", "خروج")
+        };
+
+        var (custRoute, _) = AgentUiToolDispatcher.MatchRoute("Customers", routes);
+        Assert.Equal("/Customer", custRoute);
+
+        var (faRoute, _) = AgentUiToolDispatcher.MatchRoute("مشتریان", routes);
+        Assert.Equal("/Customer", faRoute);
+
+        var (blockedRoute, _) = AgentUiToolDispatcher.MatchRoute("/logout", routes);
+        Assert.Null(blockedRoute);
+    }
+
+    [Fact]
+    public void AgentSafetyState_EnforcesUnsavedRequiredValueAndDeleteGuards()
+    {
+        var safety = new AgentSafetyState();
+        Assert.Null(safety.CheckFinishOrNavAllowed());
+        safety.MarkDirty();
+        Assert.NotNull(safety.CheckFinishOrNavAllowed());
+        safety.MarkSaved();
+        Assert.Null(safety.CheckFinishOrNavAllowed());
+
+        Assert.False(AgentSafetyState.IsProvidedValue("TBD"));
+        Assert.True(AgentSafetyState.IsProvidedValue("شرکت نمونه"));
+
+        var missing = AgentSafetyState.FindEmptyRequiredField("""{"fields":[{"id":"f1","label":"Name","required":true,"value":""}]}""");
+        Assert.Equal("Name", missing);
+
+        var blocker = AgentSafetyState.CheckDeleteBlockers("""{"blocksDelete":true,"inUseSummary":"Has 2 invoices"}""", "Acme");
+        Assert.Contains("Has 2 invoices", blocker);
+    }
+
+    [Fact]
+    public async Task AgentService_StepAsync_EnforcesFinalCallAndHowToMode()
+    {
+        var fakeProvider = new StubLlmProvider();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new AgentService(
+            fakeProvider,
+            new MemoryCacheRateLimiter(cache),
+            [],
+            Options.Create(new AgentOptions { Enabled = true, MaxTaskModelCalls = 5 }),
+            NullLogger<AgentService>.Instance);
+
+        var howToRes = await service.StepAsync(new AgentStepRequestModel
+        {
+            Messages = ["""{"role":"user","content":"[how-to question] چطور مشتری اضافه کنم؟"}"""]
+        }, "u1", CancellationToken.None);
+
+        Assert.Null(howToRes.Error);
+        Assert.Equal(3, fakeProvider.LastToolCount);
+
+        var finalRes = await service.StepAsync(new AgentStepRequestModel
+        {
+            Messages = ["""{"role":"user","content":"[final call] خلاصه بده"}"""]
+        }, "u1", CancellationToken.None);
+
+        Assert.Null(finalRes.Error);
+        Assert.Null(fakeProvider.LastToolCount);
+    }
+
+    private sealed class StubLlmProvider : IAgentLlmProvider
+    {
+        public int? LastToolCount { get; private set; }
+
+        public Task<LlmCallResult> CompleteAsync(
+            IReadOnlyList<JsonObject> messages,
+            JsonElement[]? tools,
+            CancellationToken cancellationToken)
+        {
+            LastToolCount = tools?.Length;
+            return Task.FromResult(new LlmCallResult(
+                """{"role":"assistant","content":"پاسخ تستی"}""",
+                new AgentUsageModel { Calls = 1, InputTokens = 10, OutputTokens = 5 },
+                null));
+        }
     }
 }
