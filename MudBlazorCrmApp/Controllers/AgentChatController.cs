@@ -42,16 +42,17 @@ public partial class AgentChatController(
     {
         if (!optionsAccessor.Value.Enabled) return NotFound();
         if (!ChatKeyRegex().IsMatch(chatKey))
-            return Ok(new AgentChatDetailDto(null, null, null, null, null));
+            return Ok(new AgentChatDetailDto(null, null, null, null, null, 0));
 
         var userId = User.GetAgentUserKey();
         var chat = await db.AgentChat
             .FirstOrDefaultAsync(c => c.UserId == userId && c.ChatKey == chatKey, ct);
 
         if (chat == null)
-            return Ok(new AgentChatDetailDto(null, null, null, null, null));
+            return Ok(new AgentChatDetailDto(null, null, null, null, null, 0));
 
-        return Ok(new AgentChatDetailDto(chat.ChatKey, chat.Title, chat.HistoryJson, chat.LogJson, chat.UpdatedDate));
+        var taskCount = await db.AgentTask.CountAsync(t => t.UserId == userId && t.ChatKey == chatKey, ct);
+        return Ok(new AgentChatDetailDto(chat.ChatKey, chat.Title, chat.HistoryJson, chat.LogJson, chat.UpdatedDate, taskCount));
     }
 
     [HttpPut("{chatKey}")]
@@ -181,7 +182,7 @@ public partial class AgentChatController(
 
     public sealed record AgentChatSummaryDto(string ChatKey, string Title, DateTime UpdatedDate);
     public sealed record AgentChatListResponse(List<AgentChatSummaryDto> Chats);
-    public sealed record AgentChatDetailDto(string? ChatKey, string? Title, string? HistoryJson, string? LogJson, DateTime? UpdatedDate);
+    public sealed record AgentChatDetailDto(string? ChatKey, string? Title, string? HistoryJson, string? LogJson, DateTime? UpdatedDate, int TaskCount);
     public sealed record AgentChatSaveRequest(string? Title, string? HistoryJson, string? LogJson);
     public sealed record AgentChatTaskSaveRequest(string? Goal, string? Summary, string? TranscriptJson, int InputTokens, int OutputTokens, int CachedInputTokens, decimal Cost, int ModelCalls, int DurationMs);
     public sealed record AgentChatSaveResponse(string? Error);

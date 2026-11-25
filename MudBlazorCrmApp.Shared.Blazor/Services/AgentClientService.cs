@@ -1,27 +1,20 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.JSInterop;
-using MudBlazorCrmApp.Shared.Blazor.Authorization;
+using Microsoft.Extensions.Logging;
+using MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services;
 
-public enum AgentMode
-{
-    Manual,
-    SemiAuto,
-    Auto
-}
-
 public sealed class AgentClientService(
     HttpClient httpClient,
-    IJSRuntime jsRuntime,
-    NavigationManager navigationManager,
-    AuthenticationStateProvider authenticationStateProvider,
-    AppText appText)
+    IAccessTokenProvider tokenProvider,
+    AgentChatStoreClient chatStore,
+    AgentPermissionGate permissionGate,
+    AgentUiToolDispatcher toolDispatcher,
+    AppText appText,
+    ILogger<AgentClientService> logger) : IDisposable
 {
     public event Action? OnStateChanged;
 
@@ -47,125 +40,97 @@ public sealed class AgentClientService(
     public string? PendingPermissionLabel { get; private set; }
     public string? PendingPermissionRisk { get; private set; }
 
-    public List<AgentChatEntry> Entries { get; } = [];
+    public IReadOnlyList<AgentChatEntry> Entries => _entries;
     public List<AgentChatSummaryDto> SavedChats { get; private set; } = [];
     public string CurrentChatKey { get; private set; } = NewChatKey();
     public int TotalCalls { get; private set; }
     public int TotalInputTokens { get; private set; }
     public int TotalOutputTokens { get; private set; }
     public decimal TotalCost { get; private set; }
+    public bool ShowCost { get; private set; } = true;
     public int MaxTaskSteps { get; private set; } = 25;
     public int MaxPriorTurns { get; private set; } = 80;
     public decimal MaxTaskCostUsd { get; private set; } = 0.80m;
     public int MaxTaskModelCalls { get; private set; } = 40;
-    private int _taskSeqCounter;
 
+    private readonly List<AgentChatEntry> _entries = [];
     private TaskCompletionSource<string>? _userAnswerTcs;
     private TaskCompletionSource<PermissionDecision>? _permissionTcs;
     private CancellationTokenSource? _cts;
-    private readonly HashSet<string> _alwaysAllowedActions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _declinedActions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<string> _ledger = [];
-    private string _latestSnapshotJson = "{}";
+    private Task? _activeRunTask;
+    private int _nextTaskSeq = 1;
 
     public async Task<bool> IsEnabledAsync()
     {
         try
         {
             var res = await httpClient.GetFromJsonAsync<AgentStatusDto>("/api/agent/status");
-            if (res != null)
-            {
-                if (res.MaxTaskSteps > 0) MaxTaskSteps = res.MaxTaskSteps;
-                if (res.MaxPriorTurns > 0) MaxPriorTurns = res.MaxPriorTurns;
-            }
-            return res?.UseAgent ?? false;
+            if (res == null) return false;
+            if (res.MaxTaskSteps > 0) MaxTaskSteps = res.MaxTaskSteps;
+            if (res.MaxPriorTurns > 0) MaxPriorTurns = res.MaxPriorTurns;
+            if (res.MaxTaskModelCalls > 0) MaxTaskModelCalls = res.MaxTaskModelCalls;
+            if (res.MaxTaskCostUsd > 0) MaxTaskCostUsd = res.MaxTaskCostUsd;
+            ShowCost = res.ShowCost;
+            return res.UseAgent;
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogWarning(ex, "Failed to query /api/agent/status.");
             return false;
         }
     }
 
-    public void NewChat()
-    {
-        Stop();
-        CurrentChatKey = NewChatKey();
-        Entries.Clear();
-        TotalCalls = 0;
-        TotalInputTokens = 0;
-        TotalOutputTokens = 0;
-        TotalCost = 0m;
-        WaitingForUserAnswer = false;
-        PendingQuestion = null;
-        WaitingForPermission = false;
-        PendingPermissionLabel = null;
-        PendingPermissionRisk = null;
-        _alwaysAllowedActions.Clear();
-        _declinedActions.Clear();
-        _ledger.Clear();
-        NotifyChanged();
-    }
-
-    private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
-
     public async Task LoadChatsAsync()
     {
-        try
-        {
-            using var req = new HttpRequestMessage(HttpMethod.Get, "/api/agentchat");
-            await AttachBearerIfPresentAsync(req);
-            using var res = await httpClient.SendAsync(req);
-            if (!res.IsSuccessStatusCode) return;
-            var payload = await res.Content.ReadFromJsonAsync<AgentChatListDto>();
-            if (payload?.Chats != null)
-            {
-                SavedChats = payload.Chats;
-                NotifyChanged();
-            }
-        }
-        catch { }
+        SavedChats = await chatStore.ListAsync();
+        NotifyChanged();
     }
 
     public async Task LoadChatAsync(string chatKey)
     {
-        try
-        {
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/agentchat/{chatKey}");
-            await AttachBearerIfPresentAsync(req);
-            using var res = await httpClient.SendAsync(req);
-            if (!res.IsSuccessStatusCode) return;
-            var detail = await res.Content.ReadFromJsonAsync<AgentChatDetailDto>();
-            if (detail == null || string.IsNullOrEmpty(detail.ChatKey)) return;
+        await StopAndWaitAsync();
+        var detail = await chatStore.GetAsync(chatKey);
+        if (detail == null || string.IsNullOrEmpty(detail.ChatKey)) return;
 
-            Stop();
-            CurrentChatKey = detail.ChatKey;
-            Entries.Clear();
-            if (!string.IsNullOrWhiteSpace(detail.HistoryJson))
+        CurrentChatKey = detail.ChatKey;
+        _nextTaskSeq = Math.Max(1, detail.TaskCount + 1);
+        _entries.Clear();
+        if (!string.IsNullOrWhiteSpace(detail.HistoryJson))
+        {
+            try
             {
                 var loaded = JsonSerializer.Deserialize<List<AgentChatEntry>>(detail.HistoryJson);
-                if (loaded != null) Entries.AddRange(loaded);
+                if (loaded != null) _entries.AddRange(loaded);
             }
-            TotalCalls = 0;
-            TotalInputTokens = 0;
-            TotalOutputTokens = 0;
-            TotalCost = 0m;
-            NotifyChanged();
+            catch (JsonException ex)
+            {
+                logger.LogWarning(ex, "Failed to deserialize HistoryJson for {ChatKey}.", chatKey);
+            }
         }
-        catch { }
+        permissionGate.ResetSession();
+        ResetCounters();
+        NotifyChanged();
     }
 
     public async Task DeleteChatAsync(string chatKey)
     {
-        try
-        {
-            using var req = new HttpRequestMessage(HttpMethod.Delete, $"/api/agentchat/{chatKey}");
-            await AttachBearerIfPresentAsync(req);
-            await httpClient.SendAsync(req);
-            SavedChats.RemoveAll(c => c.ChatKey == chatKey);
-            if (CurrentChatKey == chatKey) NewChat();
-            else NotifyChanged();
-        }
-        catch { }
+        if (!await chatStore.DeleteAsync(chatKey)) return;
+        SavedChats.RemoveAll(c => c.ChatKey == chatKey);
+        if (CurrentChatKey == chatKey)
+            await NewChatAsync();
+        else
+            NotifyChanged();
+    }
+
+    public async Task NewChatAsync()
+    {
+        await StopAndWaitAsync();
+        CurrentChatKey = NewChatKey();
+        _nextTaskSeq = 1;
+        _entries.Clear();
+        permissionGate.ResetSession();
+        ResetCounters();
+        NotifyChanged();
     }
 
     public void Stop()
@@ -175,13 +140,23 @@ public sealed class AgentClientService(
         _permissionTcs?.TrySetCanceled();
     }
 
+    private async Task StopAndWaitAsync()
+    {
+        Stop();
+        if (_activeRunTask is { IsCompleted: false } t)
+        {
+            try { await t; }
+            catch (OperationCanceledException) { }
+        }
+    }
+
     public void SubmitUserAnswer(string answer)
     {
         if (WaitingForUserAnswer && _userAnswerTcs != null)
         {
             WaitingForUserAnswer = false;
             PendingQuestion = null;
-            Entries.Add(new AgentChatEntry("user", answer));
+            _entries.Add(new AgentChatEntry("user", answer));
             NotifyChanged();
             _userAnswerTcs.TrySetResult(answer);
         }
@@ -199,155 +174,122 @@ public sealed class AgentClientService(
         }
     }
 
-    public async Task SendTaskAsync(string goal)
+    public Task SendTaskAsync(string goal)
     {
-        if (string.IsNullOrWhiteSpace(goal) || IsRunning) return;
+        if (string.IsNullOrWhiteSpace(goal) || IsRunning) return Task.CompletedTask;
+        _activeRunTask = RunTaskCoreAsync(goal);
+        return _activeRunTask;
+    }
 
+    private async Task RunTaskCoreAsync(string goal)
+    {
         IsRunning = true;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
-        _declinedActions.Clear();
-        _ledger.Clear();
+        permissionGate.ClearTaskDeclines();
 
-        var taskStart = DateTimeOffset.UtcNow;
-        var lastSummary = string.Empty;
-        var messages = new List<string>();
+        var run = new TaskRunState(CurrentChatKey, _nextTaskSeq++, DateTimeOffset.UtcNow);
+        var ledger = new List<string>();
+        var priorTurns = _entries.Where(e => e.Kind is "user" or "assistant").TakeLast(MaxPriorTurns).ToList();
 
-        // Collect prior turns BEFORE appending the current goal so it is never sent twice
-        var priorTurns = Entries
-            .Where(e => e.Kind is "user" or "assistant")
-            .TakeLast(MaxPriorTurns)
-            .ToList();
-
-        Entries.Add(new AgentChatEntry("user", goal));
+        _entries.Add(new AgentChatEntry("user", goal));
         NotifyChanged();
+
+        var messages = new List<string>();
+        var lastSummary = string.Empty;
 
         try
         {
             foreach (var turn in priorTurns)
-            {
-                messages.Add(JsonSerializer.Serialize(new
-                {
-                    role = turn.Kind,
-                    content = turn.Text
-                }));
-            }
+                messages.Add(JsonSerializer.Serialize(new { role = turn.Kind, content = turn.Text }));
 
-            _latestSnapshotJson = await CaptureSnapshotAsync();
-            messages.Add(
-                JsonSerializer.Serialize(new
-                {
-                    role = "user",
-                    content = $"Goal: {goal}\nDate: {DateTime.Now:yyyy-MM-dd}\nCurrent screen snapshot:\n{_latestSnapshotJson}"
-                })
-            );
+            var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
+            messages.Add(JsonSerializer.Serialize(new
+            {
+                role = "user",
+                content = $"Goal: {goal}\nDate: {DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\nCurrent screen snapshot:\n{snapshotJson}"
+            }));
 
             for (var step = 0; step < MaxTaskSteps; step++)
             {
                 ct.ThrowIfCancellationRequested();
-
-                if (TotalCalls >= MaxTaskModelCalls || TotalCost >= MaxTaskCostUsd)
+                if (run.Calls >= MaxTaskModelCalls || run.Cost >= MaxTaskCostUsd)
                 {
-                    Entries.Add(new AgentChatEntry("info", $"Task budget reached (calls: {TotalCalls}/{MaxTaskModelCalls}, cost: ${TotalCost:0.0000}/${MaxTaskCostUsd:0.00})."));
+                    _entries.Add(new AgentChatEntry("info", $"Task budget reached (calls: {run.Calls}/{MaxTaskModelCalls}, cost: ${run.Cost:0.0000}/${MaxTaskCostUsd:0.00})."));
                     break;
                 }
 
                 var stepRes = await PostStepAsync(messages, ct);
-                if (stepRes == null)
-                {
-                    Entries.Add(new AgentChatEntry("error", "Empty response from agent server."));
-                    break;
-                }
+                if (stepRes == null) { _entries.Add(new AgentChatEntry("error", "Empty response from agent server.")); break; }
 
                 if (stepRes.MaxTaskCostUsd is > 0) MaxTaskCostUsd = stepRes.MaxTaskCostUsd.Value;
                 if (stepRes.MaxTaskModelCalls is > 0) MaxTaskModelCalls = stepRes.MaxTaskModelCalls.Value;
-                AccumulateUsage(stepRes.Usage);
+                AccumulateUsage(run, stepRes.Usage);
 
-                if (!string.IsNullOrWhiteSpace(stepRes.Error))
-                {
-                    Entries.Add(new AgentChatEntry("error", stepRes.Error));
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(stepRes.Assistant))
-                {
-                    Entries.Add(new AgentChatEntry("error", "Assistant returned an empty message."));
-                    break;
-                }
+                if (!string.IsNullOrWhiteSpace(stepRes.Error)) { _entries.Add(new AgentChatEntry("error", stepRes.Error)); break; }
+                if (string.IsNullOrWhiteSpace(stepRes.Assistant)) { _entries.Add(new AgentChatEntry("error", "Assistant returned an empty message.")); break; }
 
                 if (stepRes.Prior is { Count: > 0 })
                 {
-                    foreach (var priorMsg in stepRes.Prior)
-                    {
-                        messages.Add(priorMsg);
-                        TryLogPriorMessage(priorMsg);
-                    }
+                    foreach (var p in stepRes.Prior) { messages.Add(p); TryLogPriorMessage(p); }
                 }
 
-                var serverResultsById = ParseServerToolResults(stepRes.ServerToolResults);
+                var serverResults = ParseServerToolResults(stepRes.ServerToolResults);
                 messages.Add(stepRes.Assistant);
 
-                using var assistantDoc = JsonDocument.Parse(stepRes.Assistant);
-                var msgEl = assistantDoc.RootElement;
-
-                if (!msgEl.TryGetProperty("tool_calls", out var toolCallsEl) ||
-                    toolCallsEl.ValueKind != JsonValueKind.Array ||
-                    toolCallsEl.GetArrayLength() == 0)
+                if (!TryParseToolCalls(stepRes.Assistant, out var textReply, out var toolCalls))
                 {
-                    var text = msgEl.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String
-                        ? c.GetString()
-                        : string.Empty;
-                    Entries.Add(new AgentChatEntry("assistant", AppendLedger(text ?? string.Empty)));
+                    _entries.Add(new AgentChatEntry("error", "Assistant returned malformed JSON."));
+                    break;
+                }
+
+                if (toolCalls.Count == 0)
+                {
+                    lastSummary = AppendLedger(textReply ?? string.Empty, ledger);
+                    _entries.Add(new AgentChatEntry("assistant", lastSummary));
                     break;
                 }
 
                 var finished = false;
-                foreach (var callEl in toolCallsEl.EnumerateArray())
+                foreach (var call in toolCalls)
                 {
-                    var callId = callEl.GetProperty("id").GetString() ?? Guid.NewGuid().ToString("N");
-                    var fn = callEl.GetProperty("function");
-                    var name = fn.GetProperty("name").GetString() ?? string.Empty;
-                    var argsJson = fn.TryGetProperty("arguments", out var a) && a.ValueKind == JsonValueKind.String
-                        ? a.GetString() ?? "{}"
-                        : "{}";
-
-                    Entries.Add(new AgentChatEntry("tool", $"{name}({argsJson})"));
+                    _entries.Add(new AgentChatEntry("tool", $"{call.Name}({call.ArgsJson})"));
                     NotifyChanged();
 
-                    if (serverResultsById.TryGetValue(callId, out var serverToolMsg))
+                    if (serverResults.TryGetValue(call.Id, out var serverMsg))
                     {
-                        messages.Add(serverToolMsg);
+                        messages.Add(serverMsg);
                         continue;
                     }
 
-                    var (toolResultJson, isFinish, finishSummary) = await ExecuteUiToolAsync(name, argsJson, ct);
-                    messages.Add(JsonSerializer.Serialize(new
-                    {
-                        role = "tool",
-                        tool_call_id = callId,
-                        content = toolResultJson
-                    }));
+                    var (resJson, isFinish, summary, updatedSnap) = await toolDispatcher.ExecuteAsync(
+                        call.Name, call.ArgsJson, snapshotJson, Mode, ledger, AskPermissionAsync, AskUserAsync,
+                        (c, i, o, ci, cost) => { AccumulateRawUsage(run, c, i, o, ci, cost); return Task.CompletedTask; }, ct);
+                    snapshotJson = updatedSnap;
+                    messages.Add(JsonSerializer.Serialize(new { role = "tool", tool_call_id = call.Id, content = resJson }));
 
                     if (isFinish)
                     {
-                        lastSummary = AppendLedger(finishSummary ?? string.Empty);
-                        Entries.Add(new AgentChatEntry("assistant", lastSummary));
+                        lastSummary = AppendLedger(summary ?? string.Empty, ledger);
+                        _entries.Add(new AgentChatEntry("assistant", lastSummary));
                         finished = true;
                         break;
                     }
                 }
-
                 if (finished) break;
                 NotifyChanged();
             }
         }
         catch (OperationCanceledException)
         {
-            Entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
+            if (run.ChatKey == CurrentChatKey)
+                _entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
         }
         catch (Exception ex)
         {
-            Entries.Add(new AgentChatEntry("error", ex.Message));
+            logger.LogError(ex, "Agent task execution failed.");
+            if (run.ChatKey == CurrentChatKey)
+                _entries.Add(new AgentChatEntry("error", ex.Message));
         }
         finally
         {
@@ -360,239 +302,17 @@ public sealed class AgentClientService(
             _cts?.Dispose();
             _cts = null;
             NotifyChanged();
-            _ = SaveChatAndTaskAsync(goal, lastSummary, messages, (int)(DateTimeOffset.UtcNow - taskStart).TotalMilliseconds);
-        }
-    }
 
-    private async Task SaveChatAndTaskAsync(string goal, string summary, List<string> messages, int durationMs)
-    {
-        try
-        {
-            var title = goal.Length > 80 ? goal[..80] : goal;
-            var historyJson = JsonSerializer.Serialize(Entries);
-            using var chatReq = new HttpRequestMessage(HttpMethod.Put, $"/api/agentchat/{CurrentChatKey}")
+            if (run.ChatKey == CurrentChatKey)
             {
-                Content = JsonContent.Create(new { title, historyJson, logJson = "[]" })
-            };
-            await AttachBearerIfPresentAsync(chatReq);
-            await httpClient.SendAsync(chatReq);
-
-            var taskSeq = Interlocked.Increment(ref _taskSeqCounter);
-            using var taskReq = new HttpRequestMessage(HttpMethod.Put, $"/api/agentchat/{CurrentChatKey}/tasks/{taskSeq}")
-            {
-                Content = JsonContent.Create(new
-                {
-                    goal,
-                    summary,
-                    transcriptJson = JsonSerializer.Serialize(messages),
-                    inputTokens = TotalInputTokens,
-                    outputTokens = TotalOutputTokens,
-                    cachedInputTokens = 0,
-                    cost = TotalCost,
-                    modelCalls = TotalCalls,
-                    durationMs
-                })
-            };
-            await AttachBearerIfPresentAsync(taskReq);
-            await httpClient.SendAsync(taskReq);
-            await LoadChatsAsync();
-        }
-        catch { }
-    }
-
-    private async Task<(string ResultJson, bool IsFinish, string? Summary)> ExecuteUiToolAsync(
-        string name,
-        string argsJson,
-        CancellationToken ct)
-    {
-        using var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
-        var args = argsDoc.RootElement;
-
-        switch (name)
-        {
-            case "scan_screen":
-            {
-                await jsRuntime.InvokeVoidAsync("crmAgentDriver.waitForSettle", ct, 800);
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { ok = true, snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
+                var historyJson = JsonSerializer.Serialize(_entries);
+                var transcriptJson = JsonSerializer.Serialize(messages);
+                var durationMs = (int)(DateTimeOffset.UtcNow - run.StartedAt).TotalMilliseconds;
+                await chatStore.SaveChatAndTaskAsync(
+                    run.ChatKey, run.TaskSeq, goal, lastSummary, historyJson, transcriptJson,
+                    run.InputTokens, run.OutputTokens, run.CachedInputTokens, run.Cost, run.Calls, durationMs);
+                await LoadChatsAsync();
             }
-
-            case "go_to_page":
-            {
-                var target = args.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                var (route, available) = await ResolveRouteAsync(target, ct);
-                if (route == null)
-                {
-                    return (JsonSerializer.Serialize(new
-                    {
-                        ok = false,
-                        error = $"Unknown page '{target}'.",
-                        availableRoutes = available
-                    }), false, null);
-                }
-
-                navigationManager.NavigateTo(route);
-                await jsRuntime.InvokeVoidAsync("crmAgentDriver.waitForSettle", ct, 1500);
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { ok = true, navigatedTo = route, snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
-            }
-
-            case "select_tab":
-            {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectTab", ct, id);
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
-            }
-
-            case "set_field":
-            {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                var val = args.TryGetProperty("value", out var vEl) ? vEl.GetString() ?? "" : "";
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.setField", ct, id, val);
-                _ledger.Add($"set_field({id} = \"{val}\")");
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
-            }
-
-            case "open_combo":
-            {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.openCombo", ct, id);
-                return (res, false, null);
-            }
-
-            case "pick_option":
-            {
-                var opt = args.TryGetProperty("option", out var oEl) ? oEl.GetString() ?? "" : "";
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.pickOption", ct, opt);
-                _ledger.Add($"pick_option(\"{opt}\")");
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
-            }
-
-            case "close_combo":
-            {
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.closeCombo", ct);
-                return (res, false, null);
-            }
-
-            case "click_action":
-            {
-                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                var targetName = args.TryGetProperty("targetName", out var tEl) ? tEl.GetString() : null;
-                var (actionText, risk) = LookupActionFromSnapshot(id);
-
-                if (_declinedActions.Contains(actionText))
-                {
-                    return (JsonSerializer.Serialize(new
-                    {
-                        ok = false,
-                        blocked = true,
-                        declined = true,
-                        reason = $"User previously declined '{actionText}'. Do not retry."
-                    }), false, null);
-                }
-
-                var needsPermission = risk switch
-                {
-                    "destructive" => Mode != AgentMode.Auto || string.IsNullOrWhiteSpace(targetName),
-                    "save" => Mode != AgentMode.Auto && !_alwaysAllowedActions.Contains(actionText),
-                    _ => false
-                };
-
-                if (needsPermission)
-                {
-                    var label = string.IsNullOrWhiteSpace(targetName) ? actionText : $"{actionText}: {targetName}";
-                    var decision = await AskPermissionAsync(label, risk, ct);
-                    if (decision == PermissionDecision.Deny)
-                    {
-                        _declinedActions.Add(actionText);
-                        return (JsonSerializer.Serialize(new
-                        {
-                            ok = false,
-                            declined = true,
-                            reason = $"User declined '{label}'. Do not retry."
-                        }), false, null);
-                    }
-                    if (decision == PermissionDecision.AllowAlways && risk != "destructive")
-                    {
-                        _alwaysAllowedActions.Add(actionText);
-                    }
-                }
-
-                var wasInDialog = IsInDialog(_latestSnapshotJson);
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.clickAction", ct, id);
-                _ledger.Add($"click_action({actionText} [{risk}])");
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                var (stillInDialog, hasErrors) = CheckDialogAndErrors(_latestSnapshotJson);
-                var saveDidNotComplete = risk == "save" && ((wasInDialog && stillInDialog) || hasErrors);
-                return (JsonSerializer.Serialize(new
-                {
-                    result = JsonNode.Parse(res),
-                    saveDidNotComplete,
-                    snapshot = JsonNode.Parse(_latestSnapshotJson)
-                }), false, null);
-            }
-
-            case "read_grid_headers":
-            {
-                var find = args.TryGetProperty("find", out var fEl) ? fEl.GetString() : null;
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.readGridHeaders", ct, find);
-                return (res, false, null);
-            }
-
-            case "select_grid_row":
-            {
-                var rowId = args.TryGetProperty("rowId", out var rEl) ? rEl.GetString() ?? "" : "";
-                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectGridRow", ct, rowId);
-                _latestSnapshotJson = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
-            }
-
-            case "look_at_screen":
-            {
-                var question = args.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
-                var visibleText = await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureVisibleText", ct);
-                var lookRes = await PostLookAsync(visibleText, question, ct);
-                if (lookRes?.Usage != null) AccumulateUsage(lookRes.Usage);
-
-                if (lookRes == null || !string.IsNullOrWhiteSpace(lookRes.Error))
-                {
-                    return (JsonSerializer.Serialize(new { ok = false, error = lookRes?.Error ?? "Look failed." }), false, null);
-                }
-                return (JsonSerializer.Serialize(new { ok = true, answer = lookRes.Text }), false, null);
-            }
-
-            case "lookup_term":
-            {
-                var term = args.TryGetProperty("term", out var t) ? t.GetString() ?? "" : "";
-                var (route, _) = await ResolveRouteAsync(term, ct);
-                return (JsonSerializer.Serialize(new { ok = true, term, mappedRoute = route, translated = appText[term] }), false, null);
-            }
-
-            case "ask_user":
-            {
-                var question = args.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
-                PendingQuestion = question;
-                WaitingForUserAnswer = true;
-                _userAnswerTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                Entries.Add(new AgentChatEntry("question", question));
-                NotifyChanged();
-
-                using var reg = ct.Register(() => _userAnswerTcs.TrySetCanceled(ct));
-                var answer = await _userAnswerTcs.Task;
-                return (JsonSerializer.Serialize(new { ok = true, answer }), false, null);
-            }
-
-            case "finish":
-            {
-                var summary = args.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
-                return (JsonSerializer.Serialize(new { ok = true }), true, summary);
-            }
-
-            default:
-                return (JsonSerializer.Serialize(new { ok = false, error = $"Unknown tool '{name}'." }), false, null);
         }
     }
 
@@ -603,143 +323,78 @@ public sealed class AgentClientService(
         WaitingForPermission = true;
         _permissionTcs = new TaskCompletionSource<PermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         NotifyChanged();
-
         using var reg = ct.Register(() => _permissionTcs.TrySetCanceled(ct));
         return await _permissionTcs.Task;
     }
 
-    private (string Text, string Risk) LookupActionFromSnapshot(string id)
+    private async Task<string> AskUserAsync(string question, CancellationToken ct)
     {
-        try
-        {
-            using var doc = JsonDocument.Parse(_latestSnapshotJson);
-            if (doc.RootElement.TryGetProperty("actions", out var actionsEl))
-            {
-                foreach (var a in actionsEl.EnumerateArray())
-                {
-                    if (a.TryGetProperty("id", out var idEl) && idEl.GetString() == id)
-                    {
-                        var txt = a.TryGetProperty("text", out var t) ? t.GetString() ?? id : id;
-                        var risk = a.TryGetProperty("risk", out var r) ? r.GetString() ?? "save" : "save";
-                        return (txt, risk);
-                    }
-                }
-            }
-        }
-        catch { }
-        return (id, "save");
-    }
-
-    private static bool IsInDialog(string snapshotJson)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(snapshotJson);
-            return doc.RootElement.TryGetProperty("inDialog", out var el) && el.ValueKind == JsonValueKind.True;
-        }
-        catch { return false; }
-    }
-
-    private static (bool InDialog, bool HasErrors) CheckDialogAndErrors(string snapshotJson)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(snapshotJson);
-            var inDialog = doc.RootElement.TryGetProperty("inDialog", out var d) && d.ValueKind == JsonValueKind.True;
-            var hasErrors = doc.RootElement.TryGetProperty("errors", out var e) && e.ValueKind == JsonValueKind.Array && e.GetArrayLength() > 0;
-            return (inDialog, hasErrors);
-        }
-        catch { return (false, false); }
-    }
-
-    private string AppendLedger(string summary)
-    {
-        if (_ledger.Count == 0) return summary;
-        return $"{summary}\n\n---\n**Actions executed:** {string.Join(" → ", _ledger)}";
-    }
-
-    private async Task<(string? Route, NavRouteDto[] Available)> ResolveRouteAsync(string input, CancellationToken ct)
-    {
-        var key = input.Trim();
-        var available = await GetNavRoutesAsync(ct);
-        if (string.IsNullOrEmpty(key)) return (null, available);
-        if (key.StartsWith('/')) return (key, available);
-
-        var exact = available.FirstOrDefault(r =>
-            string.Equals(r.Text, key, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(r.Href.TrimStart('/'), key, StringComparison.OrdinalIgnoreCase));
-        if (exact != null) return (exact.Href, available);
-
-        var partial = available.FirstOrDefault(r =>
-            r.Text.Contains(key, StringComparison.OrdinalIgnoreCase) ||
-            key.Contains(r.Text, StringComparison.OrdinalIgnoreCase) ||
-            r.Href.TrimStart('/').Contains(key, StringComparison.OrdinalIgnoreCase));
-        return (partial?.Href, available);
-    }
-
-    private async Task<NavRouteDto[]> GetNavRoutesAsync(CancellationToken ct)
-    {
-        try
-        {
-            var json = await jsRuntime.InvokeAsync<string>("crmAgentDriver.getNavRoutes", ct);
-            return JsonSerializer.Deserialize<NavRouteDto[]>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private sealed record NavRouteDto(string Href, string Text);
-
-    private async Task<string> CaptureSnapshotAsync()
-    {
-        return await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureSnapshot");
+        PendingQuestion = question;
+        WaitingForUserAnswer = true;
+        _userAnswerTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _entries.Add(new AgentChatEntry("question", question));
+        NotifyChanged();
+        using var reg = ct.Register(() => _userAnswerTcs.TrySetCanceled(ct));
+        return await _userAnswerTcs.Task;
     }
 
     private async Task<AgentStepResponseDto?> PostStepAsync(List<string> messages, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/agent/step")
-        {
-            Content = JsonContent.Create(new { messages })
-        };
-        await AttachBearerIfPresentAsync(req);
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/agent/step") { Content = JsonContent.Create(new { messages }) };
+        var token = await tokenProvider.GetTokenAsync();
+        if (!string.IsNullOrWhiteSpace(token)) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var res = await httpClient.SendAsync(req, ct);
         res.EnsureSuccessStatusCode();
         return await res.Content.ReadFromJsonAsync<AgentStepResponseDto>(cancellationToken: ct);
     }
 
-    private async Task<AgentLookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct)
+    private void AccumulateUsage(TaskRunState run, AgentUsageDto? u)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/agent/look")
-        {
-            Content = JsonContent.Create(new { text, question })
-        };
-        await AttachBearerIfPresentAsync(req);
-        using var res = await httpClient.SendAsync(req, ct);
-        res.EnsureSuccessStatusCode();
-        return await res.Content.ReadFromJsonAsync<AgentLookResponseDto>(cancellationToken: ct);
+        if (u != null) AccumulateRawUsage(run, u.Calls, u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.Cost);
     }
 
-    private async Task AttachBearerIfPresentAsync(HttpRequestMessage req)
+    private void AccumulateRawUsage(TaskRunState run, int calls, int input, int output, int cached, decimal? cost)
     {
-        if (authenticationStateProvider is IdentityAuthenticationStateProvider idProvider)
+        run.Calls += calls; run.InputTokens += input; run.OutputTokens += output; run.CachedInputTokens += cached;
+        if (cost.HasValue) run.Cost += cost.Value;
+        TotalCalls += calls; TotalInputTokens += input; TotalOutputTokens += output;
+        if (cost.HasValue) TotalCost += cost.Value;
+    }
+
+    private void ResetCounters()
+    {
+        TotalCalls = 0; TotalInputTokens = 0; TotalOutputTokens = 0; TotalCost = 0m;
+        WaitingForUserAnswer = false; PendingQuestion = null;
+        WaitingForPermission = false; PendingPermissionLabel = null; PendingPermissionRisk = null;
+    }
+
+    private static string AppendLedger(string summary, List<string> ledger) =>
+        ledger.Count == 0 ? summary : $"{summary}\n\n---\n**Actions executed:** {string.Join(" → ", ledger)}";
+
+    private static bool TryParseToolCalls(string assistantJson, out string? textReply, out List<(string Id, string Name, string ArgsJson)> calls)
+    {
+        textReply = null;
+        calls = [];
+        try
         {
-            var token = await idProvider.GetBearerTokenAsync();
-            if (!string.IsNullOrWhiteSpace(token))
+            using var doc = JsonDocument.Parse(assistantJson);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("tool_calls", out var tcs) || tcs.ValueKind != JsonValueKind.Array || tcs.GetArrayLength() == 0)
             {
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                textReply = root.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : string.Empty;
+                return true;
             }
+            foreach (var tc in tcs.EnumerateArray())
+            {
+                var id = tc.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? Guid.NewGuid().ToString("N") : Guid.NewGuid().ToString("N");
+                if (!tc.TryGetProperty("function", out var fn)) return false;
+                var name = fn.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
+                var args = fn.TryGetProperty("arguments", out var aEl) && aEl.ValueKind == JsonValueKind.String ? aEl.GetString() ?? "{}" : "{}";
+                calls.Add((id, name, args));
+            }
+            return true;
         }
-    }
-
-    private void AccumulateUsage(AgentUsageDto? usage)
-    {
-        if (usage == null) return;
-        TotalCalls += usage.Calls;
-        TotalInputTokens += usage.InputTokens;
-        TotalOutputTokens += usage.OutputTokens;
-        if (usage.Cost.HasValue) TotalCost += usage.Cost.Value;
+        catch (JsonException) { return false; }
     }
 
     private static Dictionary<string, string> ParseServerToolResults(List<string>? rawResults)
@@ -757,7 +412,7 @@ public sealed class AgentClientService(
                     if (!string.IsNullOrEmpty(id)) map[id] = raw;
                 }
             }
-            catch { }
+            catch (JsonException) { }
         }
         return map;
     }
@@ -772,34 +427,40 @@ public sealed class AgentClientService(
             {
                 foreach (var tc in tcs.EnumerateArray())
                 {
-                    var name = tc.GetProperty("function").GetProperty("name").GetString();
-                    var args = tc.GetProperty("function").GetProperty("arguments").GetString();
-                    Entries.Add(new AgentChatEntry("tool", $"[server] {name}({args})"));
+                    var fn = tc.GetProperty("function");
+                    _entries.Add(new AgentChatEntry("tool", $"[server] {fn.GetProperty("name").GetString()}({fn.GetProperty("arguments").GetString()})"));
                 }
             }
         }
-        catch { }
+        catch (JsonException) { }
     }
 
+    private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
     private void NotifyChanged() => OnStateChanged?.Invoke();
-
-    public enum PermissionDecision
-    {
-        AllowOnce,
-        AllowAlways,
-        Deny
-    }
+    public void Dispose() => _cts?.Dispose();
 
     public sealed record AgentChatEntry(string Kind, string Text);
-    public sealed record AgentChatSummaryDto(string ChatKey, string Title, DateTime UpdatedDate);
-    private sealed record AgentChatListDto(List<AgentChatSummaryDto>? Chats);
-    private sealed record AgentChatDetailDto(string? ChatKey, string? Title, string? HistoryJson, string? LogJson);
+
+    private sealed class TaskRunState(string chatKey, int taskSeq, DateTimeOffset startedAt)
+    {
+        public string ChatKey { get; } = chatKey;
+        public int TaskSeq { get; } = taskSeq;
+        public DateTimeOffset StartedAt { get; } = startedAt;
+        public int Calls { get; set; }
+        public int InputTokens { get; set; }
+        public int OutputTokens { get; set; }
+        public int CachedInputTokens { get; set; }
+        public decimal Cost { get; set; }
+    }
 
     private sealed class AgentStatusDto
     {
         public bool UseAgent { get; set; }
         public int MaxTaskSteps { get; set; } = 25;
         public int MaxPriorTurns { get; set; } = 80;
+        public int MaxTaskModelCalls { get; set; } = 40;
+        public decimal MaxTaskCostUsd { get; set; } = 0.80m;
+        public bool ShowCost { get; set; } = true;
     }
 
     private sealed class AgentStepResponseDto
@@ -813,17 +474,11 @@ public sealed class AgentClientService(
         public int? MaxTaskModelCalls { get; set; }
     }
 
-    private sealed class AgentLookResponseDto
-    {
-        public string? Text { get; set; }
-        public AgentUsageDto? Usage { get; set; }
-        public string? Error { get; set; }
-    }
-
     private sealed class AgentUsageDto
     {
         public int InputTokens { get; set; }
         public int OutputTokens { get; set; }
+        public int CachedInputTokens { get; set; }
         public int Calls { get; set; }
         public decimal? Cost { get; set; }
     }

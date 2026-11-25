@@ -1,5 +1,6 @@
 using MudBlazorCrmApp.Shared.Blazor.Authorization;
 using MudBlazorCrmApp.Shared.Blazor.Services;
+using MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 using Blazored.LocalStorage;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +21,10 @@ public static class Extensions
         services.AddScoped<AuthenticationStateProvider, IdentityAuthenticationStateProvider>();
         services.AddScoped<ThemeService>();
         services.AddScoped<AppText>();
+        services.AddScoped<IAccessTokenProvider, IdentityAccessTokenProvider>();
+        services.AddScoped<AgentPermissionGate>();
+        services.AddScoped<AgentChatStoreClient>();
+        services.AddScoped<AgentUiToolDispatcher>();
         services.AddScoped<AgentClientService>();
         services.AddMudServices();
     }

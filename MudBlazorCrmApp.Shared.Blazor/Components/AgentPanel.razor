@@ -1,4 +1,5 @@
 @implements IDisposable
+@using MudBlazorCrmApp.Shared.Blazor.Services.Agent
 @inject AgentClientService Agent
 @inject AppText L
 
@@ -25,8 +26,8 @@
                             <MudSelectItem Value="AgentMode.Auto">@L["AGENT_MODE_AUTO"]</MudSelectItem>
                         </MudSelect>
                         <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small" OnClick="ToggleHistory" Title="@L["AGENT_HISTORY"]" />
-                        <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small" OnClick="@(() => { _showHistory = false; Agent.NewChat(); })" Title="@L["AGENT_NEW_CHAT"]" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => Agent.IsDrawerOpen = false)" />
+                        <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small" OnClick="@(async () => { _showHistory = false; await Agent.NewChatAsync(); })" Title="@L["AGENT_NEW_CHAT"]" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => Agent.IsDrawerOpen = false)" Title="Close" />
                     </MudToolBar>
 
                     @if (_showHistory)
@@ -47,7 +48,9 @@
                                                 <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;">
                                                     @(string.IsNullOrWhiteSpace(chat.Title) ? chat.ChatKey : chat.Title)
                                                 </MudText>
-                                                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" OnClick="@(() => Agent.DeleteChatAsync(chat.ChatKey))" />
+                                                <span @onclick:stopPropagation="true">
+                                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" OnClick="@(() => Agent.DeleteChatAsync(chat.ChatKey))" Title="@L["ACTION_DELETE"]" />
+                                                </span>
                                             </MudStack>
                                         </MudListItem>
                                     }
@@ -105,7 +108,7 @@
                             }
                         }
 
-                        @if (Agent.IsRunning && !Agent.WaitingForUserAnswer)
+                        @if (Agent.IsRunning && !Agent.WaitingForUserAnswer && !Agent.WaitingForPermission)
                         {
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
@@ -117,7 +120,11 @@
                     @if (Agent.TotalCalls > 0)
                     {
                         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="px-3 py-1 border-t" data-testid="agent-stats">
-                            @string.Format(L["AGENT_STATS_FORMAT"], Agent.TotalCalls, Agent.TotalInputTokens, Agent.TotalOutputTokens)@string.Format(L["AGENT_STATS_COST_FORMAT"], Agent.TotalCost)
+                            @string.Format(L["AGENT_STATS_FORMAT"], Agent.TotalCalls, Agent.TotalInputTokens, Agent.TotalOutputTokens)
+                            @if (Agent.ShowCost)
+                            {
+                                @string.Format(L["AGENT_STATS_COST_FORMAT"], Agent.TotalCost)
+                            }
                         </MudText>
                     }
                     }
@@ -129,18 +136,18 @@
                                 @string.Format(L["AGENT_PERM_PROMPT"], Agent.PendingPermissionLabel, Agent.PendingPermissionRisk)
                             </MudAlert>
                             <MudStack Row="true" Spacing="1">
-                                <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(AgentClientService.PermissionDecision.AllowOnce))">
-                                    @L["AGENT_PERM_ALLOW_ONCE"]
-                                </MudButton>
-                                @if (Agent.PendingPermissionRisk != "destructive")
-                                {
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(AgentClientService.PermissionDecision.AllowAlways))">
-                                        @L["AGENT_PERM_ALLOW_ALWAYS"]
+                                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowOnce))">
+                                        @L["AGENT_PERM_ALLOW_ONCE"]
                                     </MudButton>
-                                }
-                                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(AgentClientService.PermissionDecision.Deny))">
-                                    @L["AGENT_PERM_DENY"]
-                                </MudButton>
+                                    @if (Agent.PendingPermissionRisk != "destructive")
+                                    {
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowAlways))">
+                                            @L["AGENT_PERM_ALLOW_ALWAYS"]
+                                        </MudButton>
+                                    }
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.Deny))">
+                                        @L["AGENT_PERM_DENY"]
+                                    </MudButton>
                             </MudStack>
                         }
                         else if (Agent.WaitingForUserAnswer)

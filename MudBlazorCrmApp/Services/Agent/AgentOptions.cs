@@ -42,5 +42,9 @@ public class AgentOptions
             MaxTaskCostUsd = 0.80m;
         if (TimeoutSeconds <= 0 || TimeoutSeconds > 300)
             TimeoutSeconds = 90;
+        if (InputPricePerMillionTokensUsd < 0)
+            InputPricePerMillionTokensUsd = 0.10m;
+        if (OutputPricePerMillionTokensUsd < 0)
+            OutputPricePerMillionTokensUsd = 0.40m;
     }
 }

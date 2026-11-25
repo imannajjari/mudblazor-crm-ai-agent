@@ -47,4 +47,7 @@ public class AgentStatusModel
     public bool UseAgent { get; set; }
     public int MaxTaskSteps { get; set; } = 25;
     public int MaxPriorTurns { get; set; } = 80;
+    public int MaxTaskModelCalls { get; set; } = 40;
+    public decimal MaxTaskCostUsd { get; set; } = 0.80m;
+    public bool ShowCost { get; set; } = true;
 }

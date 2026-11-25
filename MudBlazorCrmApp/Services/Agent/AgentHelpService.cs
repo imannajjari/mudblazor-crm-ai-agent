@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace MudBlazorCrmApp.Services.Agent;
 
-public sealed partial class AgentHelpService
+public sealed partial class AgentHelpService : IAgentHelpCatalog
 {
     private readonly List<HelpSection> _sections;
 

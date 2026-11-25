@@ -23,7 +23,10 @@ public class AgentController(
         {
             UseAgent = opts.Enabled,
             MaxTaskSteps = opts.MaxTaskSteps,
-            MaxPriorTurns = opts.MaxPriorTurns
+            MaxPriorTurns = opts.MaxPriorTurns,
+            MaxTaskModelCalls = opts.MaxTaskModelCalls,
+            MaxTaskCostUsd = opts.MaxTaskCostUsd,
+            ShowCost = opts.ShowCost
         });
     }
 

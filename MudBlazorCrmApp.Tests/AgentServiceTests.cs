@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using MudBlazorCrmApp.Data;
 using MudBlazorCrmApp.Models;
 using MudBlazorCrmApp.Services.Agent;
@@ -83,5 +84,32 @@ public class AgentServiceTests
         var loaded = db.AgentChat.Single(c => c.ChatKey == "c_test1");
         Assert.Equal(persianTitle, loaded.Title);
         Assert.Contains("سلام", loaded.HistoryJson);
+    }
+
+    [Fact]
+    public void AgentCostCalculator_ClampsCachedTokensAndRespectsShowCost()
+    {
+        var opts = new AgentOptions { ShowCost = true, InputPricePerMillionTokensUsd = 0.10m, OutputPricePerMillionTokensUsd = 0.40m };
+        var usage = new AgentUsageModel { Calls = 1, InputTokens = 1000, CachedInputTokens = 2000, OutputTokens = 500 };
+
+        AgentCostCalculator.Compute(usage, opts);
+        Assert.NotNull(usage.Cost);
+        Assert.True(usage.Cost > 0m);
+
+        opts.ShowCost = false;
+        AgentCostCalculator.Compute(usage, opts);
+        Assert.Null(usage.Cost);
+    }
+
+    [Fact]
+    public void MemoryCacheRateLimiter_EnforcesPerMinuteLimit()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var limiter = new MemoryCacheRateLimiter(cache);
+
+        Assert.True(limiter.TryAcquire("u1", 2));
+        Assert.True(limiter.TryAcquire("u1", 2));
+        Assert.False(limiter.TryAcquire("u1", 2));
+        Assert.True(limiter.TryAcquire("u2", 2));
     }
 }

@@ -4,11 +4,15 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Web;
 
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+
 namespace MudBlazorCrmApp.Services.Agent;
 
 public sealed class AgentDataService(
     IHttpClientFactory httpClientFactory,
-    IHttpContextAccessor httpContextAccessor)
+    IHttpContextAccessor httpContextAccessor,
+    IServer server) : IAgentDataReader
 {
     private const int MaxResponseChars = 6000;
     private const int DefaultTop = 10;
@@ -58,9 +62,20 @@ public sealed class AgentDataService(
         if (httpCtx == null)
             return JsonSerializer.Serialize(new { ok = false, error = "No HTTP context for loopback read." });
 
-        // Always target local loopback port rather than trusting an arbitrary Host header
-        var localPort = httpCtx.Connection.LocalPort > 0 ? httpCtx.Connection.LocalPort : 5025;
-        var baseUri = $"http://127.0.0.1:{localPort}";
+        // Prefer an HTTP address bound by Kestrel on loopback; otherwise match the active request scheme on 127.0.0.1
+        var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
+        var httpBind = addresses?.FirstOrDefault(a => a.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
+        string baseUri;
+        if (httpBind != null && Uri.TryCreate(httpBind.Replace("*", "127.0.0.1").Replace("+", "127.0.0.1").Replace("[::]", "127.0.0.1"), UriKind.Absolute, out var boundUri))
+        {
+            baseUri = $"http://127.0.0.1:{boundUri.Port}";
+        }
+        else
+        {
+            var localPort = httpCtx.Connection.LocalPort > 0 ? httpCtx.Connection.LocalPort : 5025;
+            var scheme = string.Equals(httpCtx.Request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
+            baseUri = $"{scheme}://127.0.0.1:{localPort}";
+        }
         string relativeUri;
         if (!def.IsOData)
         {
@@ -139,8 +154,18 @@ public sealed class AgentDataService(
     {
         if (!def.IsOData)
         {
-            var trimmed = rawJson.Length > MaxResponseChars ? rawJson[..MaxResponseChars] : rawJson;
-            return JsonSerializer.Serialize(new { ok = true, source = def.Name, data = JsonNode.Parse(trimmed) });
+            try
+            {
+                var node = JsonNode.Parse(rawJson);
+                var wrapped = JsonSerializer.Serialize(new { ok = true, source = def.Name, data = node });
+                return wrapped.Length > MaxResponseChars
+                    ? JsonSerializer.Serialize(new { ok = true, source = def.Name, truncated = true, preview = rawJson[..Math.Min(rawJson.Length, MaxResponseChars - 200)] })
+                    : wrapped;
+            }
+            catch (JsonException)
+            {
+                return JsonSerializer.Serialize(new { ok = false, error = "Invalid JSON from data endpoint." });
+            }
         }
 
         using var doc = JsonDocument.Parse(rawJson);

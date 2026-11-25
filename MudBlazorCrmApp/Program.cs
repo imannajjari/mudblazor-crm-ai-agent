@@ -167,6 +167,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 builder.Services.AddScoped<ImageService>();
 
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
+builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient("Loopback")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -174,8 +175,12 @@ builder.Services.AddHttpClient("Loopback")
         AllowAutoRedirect = false,
         UseCookies = false
     });
-builder.Services.AddSingleton<AgentHelpService>();
-builder.Services.AddScoped<AgentDataService>();
+builder.Services.AddSingleton<IAgentRateLimiter, MemoryCacheRateLimiter>();
+builder.Services.AddSingleton<IAgentHelpCatalog, AgentHelpService>();
+builder.Services.AddScoped<IAgentDataReader, AgentDataService>();
+builder.Services.AddScoped<IServerToolHandler, ReadDataToolHandler>();
+builder.Services.AddScoped<IServerToolHandler, AskHelpToolHandler>();
+builder.Services.AddScoped<IServerToolHandler, GetHelpPageToolHandler>();
 builder.Services.AddHttpClient<IAgentLlmProvider, OpenAiCompatibleAgentProvider>((sp, client) =>
 {
     var opts = sp.GetRequiredService<IOptions<AgentOptions>>().Value;

@@ -8,9 +8,14 @@ window.crmAgentDriver = (function () {
         const origFetch = window.fetch;
         window.fetch = function () {
             activeRequests++;
-            return origFetch.apply(this, arguments).finally(() => {
+            try {
+                return origFetch.apply(this, arguments).finally(() => {
+                    activeRequests = Math.max(0, activeRequests - 1);
+                });
+            } catch (e) {
                 activeRequests = Math.max(0, activeRequests - 1);
-            });
+                throw e;
+            }
         };
     }
 
@@ -31,11 +36,11 @@ window.crmAgentDriver = (function () {
     }
 
     function classifyRisk(label) {
-        const t = (label || '').toLowerCase();
-        if (t.includes('delete') || t.includes('remove') || t.includes('void') || t.includes('حذف')) return 'destructive';
-        if (t.includes('save') || t.includes('submit') || t.includes('add') || t.includes('create') ||
-            t.includes('update') || t.includes('ok') || t.includes('ذخیره') || t.includes('ثبت') ||
-            t.includes('افزودن') || t.includes('ویرایش') || t.includes('تایید')) {
+        const t = cleanText(label).toLowerCase();
+        if (/\b(delete|remove|void)\b/.test(t) || t.includes('حذف')) return 'destructive';
+        if (/\b(yes|confirm)\b/.test(t) || t === 'بله') return 'confirm';
+        if (/\b(save|submit|add|create|update|ok)\b/.test(t) ||
+            ['ذخیره', 'ثبت', 'افزودن', 'ویرایش', 'تایید'].some(k => t.includes(k))) {
             return 'save';
         }
         return 'read';
@@ -85,7 +90,8 @@ window.crmAgentDriver = (function () {
                 maxLength: input.maxLength > 0 ? input.maxLength : null,
                 required: input.hasAttribute('required') || ctrl.classList.contains('mud-input-required'),
                 invalid: ctrl.classList.contains('mud-input-error') || input.getAttribute('aria-invalid') === 'true',
-                disabled: input.disabled || input.readOnly
+                // MudSelect renders a readonly inner input by design; only treat readOnly as disabled for non-select inputs
+                disabled: isSelect ? (ctrl.classList.contains('mud-disabled') || input.disabled) : (input.disabled || input.readOnly)
             });
         });
 
@@ -221,8 +227,9 @@ window.crmAgentDriver = (function () {
         } else {
             input.value = strVal;
         }
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, data: strVal }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => requestAnimationFrame(r));
         input.blur();
 
         await waitForSettle(400);
@@ -254,14 +261,14 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: false, error: 'No open combo options found. Call open_combo first.' });
         }
 
-        let match = null;
-        if (typeof optionTextOrIndex === 'number' || /^\d+$/.test(String(optionTextOrIndex))) {
+        const q = cleanText(String(optionTextOrIndex)).toLowerCase();
+        let match = items.find(i => cleanText(i.innerText).toLowerCase() === q);
+        if (!match && (typeof optionTextOrIndex === 'number' || /^\d+$/.test(String(optionTextOrIndex)))) {
             const idx = Number(optionTextOrIndex) - 1;
             if (idx >= 0 && idx < items.length) match = items[idx];
-        } else {
-            const q = cleanText(String(optionTextOrIndex)).toLowerCase();
-            match = items.find(i => cleanText(i.innerText).toLowerCase() === q)
-                || items.find(i => cleanText(i.innerText).toLowerCase().includes(q));
+        }
+        if (!match) {
+            match = items.find(i => cleanText(i.innerText).toLowerCase().includes(q));
         }
 
         if (!match) {
@@ -330,6 +337,7 @@ window.crmAgentDriver = (function () {
     }
 
     function getNavRoutes() {
+        const blocked = new Set(['/logout', '/account/changepassword', '/login', '/register']);
         const links = Array.from(document.querySelectorAll('.mud-nav-menu a.mud-nav-link'));
         const seen = new Set();
         const routes = [];
@@ -338,6 +346,7 @@ window.crmAgentDriver = (function () {
             const text = cleanText(a.innerText);
             if (!href || href.startsWith('http') || href === '#') return;
             const normHref = href.startsWith('/') ? href : '/' + href;
+            if (blocked.has(normHref.toLowerCase())) return;
             const key = normHref + '|' + text;
             if (seen.has(key)) return;
             seen.add(key);
