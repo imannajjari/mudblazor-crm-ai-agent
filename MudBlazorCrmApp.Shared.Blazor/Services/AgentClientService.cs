@@ -1,0 +1,510 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.JSInterop;
+using MudBlazorCrmApp.Shared.Blazor.Authorization;
+
+namespace MudBlazorCrmApp.Shared.Blazor.Services;
+
+public sealed class AgentClientService(
+    HttpClient httpClient,
+    IJSRuntime jsRuntime,
+    NavigationManager navigationManager,
+    AuthenticationStateProvider authenticationStateProvider,
+    AppText appText)
+{
+    private const int MaxSteps = 20;
+
+    private static readonly Dictionary<string, string> PageRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["dashboard"] = "/crmdashboard",
+        ["داشبورد"] = "/crmdashboard",
+        ["crmdashboard"] = "/crmdashboard",
+        ["pipeline"] = "/pipeline",
+        ["پایپ‌لاین"] = "/pipeline",
+        ["بورد پایپ‌لاین"] = "/pipeline",
+        ["calendar"] = "/calendar",
+        ["تقویم"] = "/calendar",
+        ["leads"] = "/Lead",
+        ["lead"] = "/Lead",
+        ["سرنخ‌ها"] = "/Lead",
+        ["سرنخ"] = "/Lead",
+        ["opportunities"] = "/Opportunity",
+        ["opportunity"] = "/Opportunity",
+        ["فرصت‌ها"] = "/Opportunity",
+        ["فرصت"] = "/Opportunity",
+        ["sales"] = "/Sale",
+        ["sale"] = "/Sale",
+        ["فروش"] = "/Sale",
+        ["فروش‌ها"] = "/Sale",
+        ["activities"] = "/Activity",
+        ["activity"] = "/Activity",
+        ["فعالیت‌ها"] = "/Activity",
+        ["فعالیت"] = "/Activity",
+        ["customers"] = "/Customer",
+        ["customer"] = "/Customer",
+        ["companies"] = "/Customer",
+        ["مشتریان"] = "/Customer",
+        ["شرکت‌ها"] = "/Customer",
+        ["contacts"] = "/Contact",
+        ["contact"] = "/Contact",
+        ["مخاطبین"] = "/Contact",
+        ["addresses"] = "/Address",
+        ["address"] = "/Address",
+        ["آدرس‌ها"] = "/Address",
+        ["products"] = "/Product",
+        ["product"] = "/Product",
+        ["محصولات"] = "/Product",
+        ["services"] = "/Service",
+        ["service"] = "/Service",
+        ["خدمات"] = "/Service",
+        ["vendors"] = "/Vendor",
+        ["vendor"] = "/Vendor",
+        ["تامین‌کنندگان"] = "/Vendor",
+        ["support"] = "/SupportCase",
+        ["support cases"] = "/SupportCase",
+        ["supportcase"] = "/SupportCase",
+        ["تیکت‌ها"] = "/SupportCase",
+        ["تیکت‌های پشتیبانی"] = "/SupportCase",
+        ["communications"] = "/communication",
+        ["ارتباطات"] = "/communication",
+        ["tasks"] = "/TodoTask",
+        ["todotask"] = "/TodoTask",
+        ["وظایف"] = "/TodoTask",
+        ["لیست وظایف"] = "/TodoTask",
+        ["kanban"] = "/KanbanTodoTask",
+        ["کانبان"] = "/KanbanTodoTask",
+        ["rewards"] = "/Reward",
+        ["پاداش‌ها"] = "/Reward",
+        ["tags"] = "/Tag",
+        ["برچسب‌ها"] = "/Tag",
+        ["reports"] = "/reports",
+        ["گزارش‌ها"] = "/reports",
+        ["import"] = "/import",
+        ["email templates"] = "/emailtemplate",
+        ["users"] = "/user",
+        ["کاربران"] = "/user",
+        ["audit log"] = "/auditlog"
+    };
+
+    public event Action? OnStateChanged;
+
+    public bool IsDrawerOpen { get; set; }
+    public bool IsRunning { get; private set; }
+    public bool WaitingForUserAnswer { get; private set; }
+    public string? PendingQuestion { get; private set; }
+    public List<AgentChatEntry> Entries { get; } = [];
+    public int TotalCalls { get; private set; }
+    public int TotalInputTokens { get; private set; }
+    public int TotalOutputTokens { get; private set; }
+
+    private TaskCompletionSource<string>? _userAnswerTcs;
+    private CancellationTokenSource? _cts;
+
+    public async Task<bool> IsEnabledAsync()
+    {
+        try
+        {
+            var res = await httpClient.GetFromJsonAsync<AgentStatusDto>("/api/agent/status");
+            return res?.UseAgent ?? false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public void NewChat()
+    {
+        Stop();
+        Entries.Clear();
+        TotalCalls = 0;
+        TotalInputTokens = 0;
+        TotalOutputTokens = 0;
+        WaitingForUserAnswer = false;
+        PendingQuestion = null;
+        NotifyChanged();
+    }
+
+    public void Stop()
+    {
+        _cts?.Cancel();
+        _userAnswerTcs?.TrySetCanceled();
+    }
+
+    public void SubmitUserAnswer(string answer)
+    {
+        if (WaitingForUserAnswer && _userAnswerTcs != null)
+        {
+            WaitingForUserAnswer = false;
+            PendingQuestion = null;
+            Entries.Add(new AgentChatEntry("user", answer));
+            NotifyChanged();
+            _userAnswerTcs.TrySetResult(answer);
+        }
+    }
+
+    public async Task SendTaskAsync(string goal)
+    {
+        if (string.IsNullOrWhiteSpace(goal) || IsRunning) return;
+
+        IsRunning = true;
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+
+        Entries.Add(new AgentChatEntry("user", goal));
+        NotifyChanged();
+
+        try
+        {
+            var initialSnapshot = await CaptureSnapshotAsync();
+            var messages = new List<string>
+            {
+                JsonSerializer.Serialize(new
+                {
+                    role = "user",
+                    content = $"Goal: {goal}\nDate: {DateTime.Now:yyyy-MM-dd}\nCurrent screen snapshot:\n{initialSnapshot}"
+                })
+            };
+
+            for (var step = 0; step < MaxSteps; step++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var stepRes = await PostStepAsync(messages, ct);
+                if (stepRes == null)
+                {
+                    Entries.Add(new AgentChatEntry("error", "Empty response from agent server."));
+                    break;
+                }
+
+                AccumulateUsage(stepRes.Usage);
+
+                if (!string.IsNullOrWhiteSpace(stepRes.Error))
+                {
+                    Entries.Add(new AgentChatEntry("error", stepRes.Error));
+                    break;
+                }
+
+                if (string.IsNullOrWhiteSpace(stepRes.Assistant))
+                {
+                    Entries.Add(new AgentChatEntry("error", "Assistant returned an empty message."));
+                    break;
+                }
+
+                if (stepRes.Prior is { Count: > 0 })
+                {
+                    foreach (var priorMsg in stepRes.Prior)
+                    {
+                        messages.Add(priorMsg);
+                        TryLogPriorMessage(priorMsg);
+                    }
+                }
+
+                var serverResultsById = ParseServerToolResults(stepRes.ServerToolResults);
+                messages.Add(stepRes.Assistant);
+
+                using var assistantDoc = JsonDocument.Parse(stepRes.Assistant);
+                var msgEl = assistantDoc.RootElement;
+
+                if (!msgEl.TryGetProperty("tool_calls", out var toolCallsEl) ||
+                    toolCallsEl.ValueKind != JsonValueKind.Array ||
+                    toolCallsEl.GetArrayLength() == 0)
+                {
+                    var text = msgEl.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String
+                        ? c.GetString()
+                        : string.Empty;
+                    Entries.Add(new AgentChatEntry("assistant", text ?? string.Empty));
+                    break;
+                }
+
+                var finished = false;
+                foreach (var callEl in toolCallsEl.EnumerateArray())
+                {
+                    var callId = callEl.GetProperty("id").GetString() ?? Guid.NewGuid().ToString("N");
+                    var fn = callEl.GetProperty("function");
+                    var name = fn.GetProperty("name").GetString() ?? string.Empty;
+                    var argsJson = fn.TryGetProperty("arguments", out var a) && a.ValueKind == JsonValueKind.String
+                        ? a.GetString() ?? "{}"
+                        : "{}";
+
+                    Entries.Add(new AgentChatEntry("tool", $"{name}({argsJson})"));
+                    NotifyChanged();
+
+                    if (serverResultsById.TryGetValue(callId, out var serverToolMsg))
+                    {
+                        messages.Add(serverToolMsg);
+                        continue;
+                    }
+
+                    var (toolResultJson, isFinish, finishSummary) = await ExecuteUiToolAsync(name, argsJson, ct);
+                    messages.Add(JsonSerializer.Serialize(new
+                    {
+                        role = "tool",
+                        tool_call_id = callId,
+                        content = toolResultJson
+                    }));
+
+                    if (isFinish)
+                    {
+                        Entries.Add(new AgentChatEntry("assistant", finishSummary ?? string.Empty));
+                        finished = true;
+                        break;
+                    }
+                }
+
+                if (finished) break;
+                NotifyChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
+        }
+        catch (Exception ex)
+        {
+            Entries.Add(new AgentChatEntry("error", ex.Message));
+        }
+        finally
+        {
+            IsRunning = false;
+            WaitingForUserAnswer = false;
+            PendingQuestion = null;
+            _cts?.Dispose();
+            _cts = null;
+            NotifyChanged();
+        }
+    }
+
+    private async Task<(string ResultJson, bool IsFinish, string? Summary)> ExecuteUiToolAsync(
+        string name,
+        string argsJson,
+        CancellationToken ct)
+    {
+        using var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
+        var args = argsDoc.RootElement;
+
+        switch (name)
+        {
+            case "scan_screen":
+            {
+                await jsRuntime.InvokeVoidAsync("crmAgentDriver.waitForSettle", ct, 800);
+                var snap = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { ok = true, snapshot = JsonNode.Parse(snap) }), false, null);
+            }
+
+            case "go_to_page":
+            {
+                var target = args.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                var route = ResolveRoute(target);
+                if (route == null)
+                {
+                    return (JsonSerializer.Serialize(new
+                    {
+                        ok = false,
+                        error = $"Unknown page '{target}'.",
+                        availableRoutes = PageRoutes.Values.Distinct().OrderBy(x => x).ToArray()
+                    }), false, null);
+                }
+
+                navigationManager.NavigateTo(route);
+                await jsRuntime.InvokeVoidAsync("crmAgentDriver.waitForSettle", ct, 1500);
+                var snap = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { ok = true, navigatedTo = route, snapshot = JsonNode.Parse(snap) }), false, null);
+            }
+
+            case "select_tab":
+            {
+                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectTab", ct, id);
+                var snap = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(snap) }), false, null);
+            }
+
+            case "look_at_screen":
+            {
+                var question = args.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
+                var visibleText = await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureVisibleText", ct);
+                var lookRes = await PostLookAsync(visibleText, question, ct);
+                if (lookRes?.Usage != null) AccumulateUsage(lookRes.Usage);
+
+                if (lookRes == null || !string.IsNullOrWhiteSpace(lookRes.Error))
+                {
+                    return (JsonSerializer.Serialize(new { ok = false, error = lookRes?.Error ?? "Look failed." }), false, null);
+                }
+                return (JsonSerializer.Serialize(new { ok = true, answer = lookRes.Text }), false, null);
+            }
+
+            case "lookup_term":
+            {
+                var term = args.TryGetProperty("term", out var t) ? t.GetString() ?? "" : "";
+                var route = ResolveRoute(term);
+                return (JsonSerializer.Serialize(new { ok = true, term, mappedRoute = route, translated = appText[term] }), false, null);
+            }
+
+            case "ask_user":
+            {
+                var question = args.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
+                PendingQuestion = question;
+                WaitingForUserAnswer = true;
+                _userAnswerTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Entries.Add(new AgentChatEntry("question", question));
+                NotifyChanged();
+
+                using var reg = ct.Register(() => _userAnswerTcs.TrySetCanceled(ct));
+                var answer = await _userAnswerTcs.Task;
+                return (JsonSerializer.Serialize(new { ok = true, answer }), false, null);
+            }
+
+            case "finish":
+            {
+                var summary = args.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
+                return (JsonSerializer.Serialize(new { ok = true }), true, summary);
+            }
+
+            default:
+                return (JsonSerializer.Serialize(new { ok = false, error = $"Tool '{name}' is not available in Phase 1 (read-only)." }), false, null);
+        }
+    }
+
+    private static string? ResolveRoute(string input)
+    {
+        var key = input.Trim();
+        if (string.IsNullOrEmpty(key)) return null;
+        if (key.StartsWith('/')) return key;
+        if (PageRoutes.TryGetValue(key, out var exact)) return exact;
+
+        foreach (var pair in PageRoutes)
+        {
+            if (pair.Key.Contains(key, StringComparison.OrdinalIgnoreCase) ||
+                key.Contains(pair.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                return pair.Value;
+            }
+        }
+        return null;
+    }
+
+    private async Task<string> CaptureSnapshotAsync()
+    {
+        return await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureSnapshot");
+    }
+
+    private async Task<AgentStepResponseDto?> PostStepAsync(List<string> messages, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/agent/step")
+        {
+            Content = JsonContent.Create(new { messages })
+        };
+        await AttachBearerIfPresentAsync(req);
+        using var res = await httpClient.SendAsync(req, ct);
+        res.EnsureSuccessStatusCode();
+        return await res.Content.ReadFromJsonAsync<AgentStepResponseDto>(cancellationToken: ct);
+    }
+
+    private async Task<AgentLookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/agent/look")
+        {
+            Content = JsonContent.Create(new { text, question })
+        };
+        await AttachBearerIfPresentAsync(req);
+        using var res = await httpClient.SendAsync(req, ct);
+        res.EnsureSuccessStatusCode();
+        return await res.Content.ReadFromJsonAsync<AgentLookResponseDto>(cancellationToken: ct);
+    }
+
+    private async Task AttachBearerIfPresentAsync(HttpRequestMessage req)
+    {
+        if (authenticationStateProvider is IdentityAuthenticationStateProvider idProvider)
+        {
+            var token = await idProvider.GetBearerTokenAsync();
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+        }
+    }
+
+    private void AccumulateUsage(AgentUsageDto? usage)
+    {
+        if (usage == null) return;
+        TotalCalls += usage.Calls;
+        TotalInputTokens += usage.InputTokens;
+        TotalOutputTokens += usage.OutputTokens;
+    }
+
+    private static Dictionary<string, string> ParseServerToolResults(List<string>? rawResults)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (rawResults == null) return map;
+        foreach (var raw in rawResults)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                if (doc.RootElement.TryGetProperty("tool_call_id", out var idEl) && idEl.ValueKind == JsonValueKind.String)
+                {
+                    var id = idEl.GetString();
+                    if (!string.IsNullOrEmpty(id)) map[id] = raw;
+                }
+            }
+            catch { }
+        }
+        return map;
+    }
+
+    private void TryLogPriorMessage(string raw)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.TryGetProperty("role", out var r) && r.GetString() == "assistant" &&
+                doc.RootElement.TryGetProperty("tool_calls", out var tcs) && tcs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var tc in tcs.EnumerateArray())
+                {
+                    var name = tc.GetProperty("function").GetProperty("name").GetString();
+                    var args = tc.GetProperty("function").GetProperty("arguments").GetString();
+                    Entries.Add(new AgentChatEntry("tool", $"[server] {name}({args})"));
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void NotifyChanged() => OnStateChanged?.Invoke();
+
+    public sealed record AgentChatEntry(string Kind, string Text);
+
+    private sealed class AgentStatusDto
+    {
+        public bool UseAgent { get; set; }
+    }
+
+    private sealed class AgentStepResponseDto
+    {
+        public string? Assistant { get; set; }
+        public List<string>? Prior { get; set; }
+        public List<string>? ServerToolResults { get; set; }
+        public AgentUsageDto? Usage { get; set; }
+        public string? Error { get; set; }
+    }
+
+    private sealed class AgentLookResponseDto
+    {
+        public string? Text { get; set; }
+        public AgentUsageDto? Usage { get; set; }
+        public string? Error { get; set; }
+    }
+
+    private sealed class AgentUsageDto
+    {
+        public int InputTokens { get; set; }
+        public int OutputTokens { get; set; }
+        public int Calls { get; set; }
+    }
+}

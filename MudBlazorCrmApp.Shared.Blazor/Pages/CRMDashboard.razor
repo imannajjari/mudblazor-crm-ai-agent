@@ -10,10 +10,11 @@
 @inject HttpClient HttpClient
 @inject IJSRuntime JSRuntime
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject AppText L
 
-<PageTitle>CRM Dashboard</PageTitle>
+<PageTitle>@L["DASHBOARD_TITLE"]</PageTitle>
 
-<MudText Typo="Typo.h3">Welcome to the CRM Dashboard</MudText>
+<MudText Typo="Typo.h3">@L["DASHBOARD_WELCOME"]</MudText>
 
 @if (_isLoading)
 {

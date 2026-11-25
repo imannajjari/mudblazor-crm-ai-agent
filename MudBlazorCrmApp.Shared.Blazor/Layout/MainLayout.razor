@@ -1,4 +1,6 @@
 @inherits LayoutComponentBase
+@inject AppText L
+<MudRTLProvider RightToLeft="@L.IsRtl">
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -10,4 +12,6 @@
             @Body
         </MudContainer>
     </MudMainContent>
+    <AgentPanel />
 </MudLayout>
+</MudRTLProvider>

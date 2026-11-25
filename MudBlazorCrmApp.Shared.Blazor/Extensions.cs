@@ -19,6 +19,8 @@ public static class Extensions
         services.AddAuthorizationCore();
         services.AddScoped<AuthenticationStateProvider, IdentityAuthenticationStateProvider>();
         services.AddScoped<ThemeService>();
+        services.AddScoped<AppText>();
+        services.AddScoped<AgentClientService>();
         services.AddMudServices();
     }
 

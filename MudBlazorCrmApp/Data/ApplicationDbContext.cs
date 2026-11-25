@@ -23,6 +23,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     }
 
     public DbSet<Customer> Customer => Set<Customer>();
+    public DbSet<AgentChat> AgentChat => Set<AgentChat>();
+    public DbSet<AgentTask> AgentTask => Set<AgentTask>();
 
     public override int SaveChanges()
     {
@@ -51,6 +53,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         foreach (var entry in ChangeTracker.Entries())
         {
             if (entry.Entity is AuditLog || entry.Entity is ActivityLog ||
+                entry.Entity is AgentChat || entry.Entity is AgentTask ||
                 entry.State == EntityState.Detached || entry.State == EntityState.Unchanged)
                 continue;
 

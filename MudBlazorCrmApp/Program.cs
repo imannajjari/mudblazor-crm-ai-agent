@@ -13,7 +13,9 @@ using System.Threading.RateLimiting;
 using MudBlazorCrmApp.Data;
 using MudBlazorCrmApp.Models;
 using MudBlazorCrmApp.Services;
+using MudBlazorCrmApp.Services.Agent;
 using MudBlazorCrmApp.Shared.Models;
+using Microsoft.Extensions.Options;
 using Serilog;
 
 Environment.CurrentDirectory = AppContext.BaseDirectory;
@@ -82,6 +84,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     options.UseSqlite(builder.Configuration.GetConnectionString("ApplicationDbContext"));
+    options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 
 builder.Services.AddRazorPages();
@@ -163,6 +166,25 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddScoped<ImageService>();
 
+builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient("Loopback")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false
+    });
+builder.Services.AddSingleton<AgentHelpService>();
+builder.Services.AddScoped<AgentDataService>();
+builder.Services.AddHttpClient<IAgentLlmProvider, OpenAiCompatibleAgentProvider>((sp, client) =>
+{
+    var opts = sp.GetRequiredService<IOptions<AgentOptions>>().Value;
+    opts.Normalize();
+    client.BaseAddress = new Uri(opts.BaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
+});
+builder.Services.AddScoped<AgentService>();
+
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
     .WriteTo.File(
@@ -221,6 +243,38 @@ using (var scope = app.Services.CreateScope())
     var ctx = services.GetRequiredService<ApplicationDbContext>();
 
     ctx.Database.Migrate();
+
+    ctx.Database.ExecuteSqlRaw("""
+        CREATE TABLE IF NOT EXISTS "AgentChat" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_AgentChat" PRIMARY KEY AUTOINCREMENT,
+            "UserId" TEXT NOT NULL,
+            "ChatKey" TEXT NOT NULL,
+            "Title" TEXT NOT NULL,
+            "HistoryJson" TEXT NOT NULL,
+            "LogJson" TEXT NOT NULL,
+            "CreatedDate" TEXT NOT NULL,
+            "UpdatedDate" TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "IX_AgentChat_UserId_ChatKey" ON "AgentChat" ("UserId", "ChatKey");
+        CREATE TABLE IF NOT EXISTS "AgentTask" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_AgentTask" PRIMARY KEY AUTOINCREMENT,
+            "UserId" TEXT NOT NULL,
+            "ChatKey" TEXT NOT NULL,
+            "TaskSeq" INTEGER NOT NULL,
+            "Goal" TEXT NOT NULL,
+            "Summary" TEXT NOT NULL,
+            "TranscriptJson" TEXT NOT NULL,
+            "InputTokens" INTEGER NOT NULL,
+            "OutputTokens" INTEGER NOT NULL,
+            "CachedInputTokens" INTEGER NOT NULL,
+            "Cost" TEXT NOT NULL,
+            "ModelCalls" INTEGER NOT NULL,
+            "DurationMs" INTEGER NOT NULL,
+            "StartedDate" TEXT NOT NULL,
+            "CreatedDate" TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "IX_AgentTask_UserId_ChatKey_TaskSeq" ON "AgentTask" ("UserId", "ChatKey", "TaskSeq");
+        """);
 
     // Seed only if no users exist (fresh database)
     var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();

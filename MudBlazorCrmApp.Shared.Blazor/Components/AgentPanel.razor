@@ -1,0 +1,197 @@
+@implements IDisposable
+@inject AgentClientService Agent
+@inject AppText L
+
+@if (_enabled)
+{
+    <MudDrawer Open="@Agent.IsDrawerOpen"
+               OpenChanged="@(v => Agent.IsDrawerOpen = v)"
+               Anchor="Anchor.End"
+               Variant="DrawerVariant.Temporary"
+               Width="420px"
+               Elevation="4"
+               data-agent-panel="true"
+               data-testid="agent-panel">
+        <ErrorBoundary>
+            <ChildContent>
+                <MudStack Style="height:100%;" Spacing="0" data-agent-panel="true">
+                    <MudToolBar Dense="true" Class="px-3 border-b">
+                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Color="Color.Primary" Class="me-2" />
+                        <MudText Typo="Typo.subtitle1"><b>@L["AGENT_TITLE"]</b></MudText>
+                        <MudSpacer />
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" data-testid="agent-mode">
+                            @L["AGENT_MODE_READONLY"]
+                        </MudChip>
+                        <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small" OnClick="@(() => Agent.NewChat())" Title="@L["AGENT_NEW_CHAT"]" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => Agent.IsDrawerOpen = false)" />
+                    </MudToolBar>
+
+                    <div style="flex:1;overflow-y:auto;padding:12px;" class="d-flex flex-column gap-2">
+                        @if (Agent.Entries.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                                @L["AGENT_EMPTY_STATE"]
+                            </MudAlert>
+                        }
+                        else
+                        {
+                            @foreach (var entry in Agent.Entries)
+                            {
+                                @if (entry.Kind == "user")
+                                {
+                                    <MudPaper Class="pa-2 mud-theme-primary align-self-end" Style="max-width:85%;border-radius:10px;">
+                                        <MudText Typo="Typo.body2">@entry.Text</MudText>
+                                    </MudPaper>
+                                }
+                                else if (entry.Kind == "assistant")
+                                {
+                                    <MudPaper Class="pa-3 align-self-start" Outlined="true" Style="max-width:95%;border-radius:10px;white-space:pre-wrap;">
+                                        <MudText Typo="Typo.body2">@entry.Text</MudText>
+                                    </MudPaper>
+                                }
+                                else if (entry.Kind == "tool")
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-family:monospace;direction:ltr;text-align:left;">
+                                        ⚙ @entry.Text
+                                    </MudText>
+                                }
+                                else if (entry.Kind == "question")
+                                {
+                                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                                        @entry.Text
+                                    </MudAlert>
+                                }
+                                else if (entry.Kind == "error")
+                                {
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                                        @L["AGENT_ERROR_PREFIX"]@entry.Text
+                                    </MudAlert>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@entry.Text</MudText>
+                                }
+                            }
+                        }
+
+                        @if (Agent.IsRunning && !Agent.WaitingForUserAnswer)
+                        {
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AGENT_THINKING"]</MudText>
+                            </MudStack>
+                        }
+                    </div>
+
+                    @if (Agent.TotalCalls > 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="px-3 py-1 border-t" data-testid="agent-stats">
+                            @string.Format(L["AGENT_STATS_FORMAT"], Agent.TotalCalls, Agent.TotalInputTokens, Agent.TotalOutputTokens)
+                        </MudText>
+                    }
+
+                    <div class="pa-3 border-t">
+                        @if (Agent.WaitingForUserAnswer)
+                        {
+                            <MudStack Row="true" Spacing="1">
+                                <MudTextField @bind-Value="_answerInput"
+                                              Placeholder="@(Agent.PendingQuestion ?? L["AGENT_INPUT_PLACEHOLDER"])"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense"
+                                              Immediate="true"
+                                              OnKeyDown="OnAnswerKeyDown"
+                                              Style="flex:1;" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SubmitAnswer">@L["AGENT_SEND"]</MudButton>
+                            </MudStack>
+                        }
+                        else
+                        {
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudTextField @bind-Value="_taskInput"
+                                              Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense"
+                                              Disabled="@Agent.IsRunning"
+                                              Immediate="true"
+                                              OnKeyDown="OnTaskKeyDown"
+                                              data-testid="agent-input"
+                                              Style="flex:1;" />
+                                @if (Agent.IsRunning)
+                                {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="@(() => Agent.Stop())" data-testid="agent-stop">
+                                        @L["AGENT_STOP"]
+                                    </MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" data-testid="agent-send">
+                                        @L["AGENT_SEND"]
+                                    </MudButton>
+                                }
+                            </MudStack>
+                        }
+                    </div>
+                </MudStack>
+            </ChildContent>
+            <ErrorContent Context="ex">
+                <MudAlert Severity="Severity.Error" Class="ma-3">
+                    @L["AGENT_ERROR_PREFIX"]@ex.Message
+                </MudAlert>
+            </ErrorContent>
+        </ErrorBoundary>
+    </MudDrawer>
+}
+
+@code {
+    private bool _enabled;
+    private string _taskInput = string.Empty;
+    private string _answerInput = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Agent.OnStateChanged += HandleStateChanged;
+        _enabled = await Agent.IsEnabledAsync();
+    }
+
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SendTask()
+    {
+        var goal = _taskInput.Trim();
+        if (string.IsNullOrEmpty(goal)) return;
+        _taskInput = string.Empty;
+        await Agent.SendTaskAsync(goal);
+    }
+
+    private void SubmitAnswer()
+    {
+        var ans = _answerInput.Trim();
+        if (string.IsNullOrEmpty(ans)) return;
+        _answerInput = string.Empty;
+        Agent.SubmitUserAnswer(ans);
+    }
+
+    private async Task OnTaskKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey && !Agent.IsRunning)
+        {
+            await SendTask();
+        }
+    }
+
+    private void OnAnswerKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            SubmitAnswer();
+        }
+    }
+
+    public void Dispose()
+    {
+        Agent.OnStateChanged -= HandleStateChanged;
+    }
+}
