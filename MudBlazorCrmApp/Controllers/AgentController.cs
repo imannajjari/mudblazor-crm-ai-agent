@@ -1,21 +1,30 @@
-using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using MudBlazorCrmApp.Services.Agent;
 
 namespace MudBlazorCrmApp.Controllers;
 
+[Authorize]
 [Route("api/[controller]")]
 [ApiController]
 public class AgentController(
     AgentService agentService,
     IOptions<AgentOptions> optionsAccessor) : ControllerBase
 {
+    [AllowAnonymous]
     [HttpGet("status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<AgentStatusModel> Status()
     {
-        return Ok(new AgentStatusModel { UseAgent = optionsAccessor.Value.Enabled });
+        var opts = optionsAccessor.Value;
+        opts.Normalize();
+        return Ok(new AgentStatusModel
+        {
+            UseAgent = opts.Enabled,
+            MaxTaskSteps = opts.MaxTaskSteps,
+            MaxPriorTurns = opts.MaxPriorTurns
+        });
     }
 
     [HttpPost("step")]
@@ -28,7 +37,7 @@ public class AgentController(
         if (!optionsAccessor.Value.Enabled)
             return NotFound();
 
-        var userKey = GetUserKey();
+        var userKey = User.GetAgentUserKey();
         var response = await agentService.StepAsync(request, userKey, cancellationToken);
         return Ok(response);
     }
@@ -43,16 +52,8 @@ public class AgentController(
         if (!optionsAccessor.Value.Enabled)
             return NotFound();
 
-        var userKey = GetUserKey();
+        var userKey = User.GetAgentUserKey();
         var response = await agentService.LookAsync(request, userKey, cancellationToken);
         return Ok(response);
-    }
-
-    private string GetUserKey()
-    {
-        return User.FindFirstValue(ClaimTypes.NameIdentifier)
-               ?? User.Identity?.Name
-               ?? HttpContext.Connection.RemoteIpAddress?.ToString()
-               ?? "anonymous";
     }
 }

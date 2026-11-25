@@ -1,5 +1,5 @@
-using System.Security.Claims;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -9,6 +9,7 @@ using MudBlazorCrmApp.Services.Agent;
 
 namespace MudBlazorCrmApp.Controllers;
 
+[Authorize]
 [Route("api/[controller]")]
 [ApiController]
 public partial class AgentChatController(
@@ -25,7 +26,7 @@ public partial class AgentChatController(
     {
         if (!optionsAccessor.Value.Enabled) return NotFound();
 
-        var userId = GetUserKey();
+        var userId = User.GetAgentUserKey();
         var chats = await db.AgentChat
             .Where(c => c.UserId == userId)
             .OrderByDescending(c => c.UpdatedDate)
@@ -43,7 +44,7 @@ public partial class AgentChatController(
         if (!ChatKeyRegex().IsMatch(chatKey))
             return Ok(new AgentChatDetailDto(null, null, null, null, null));
 
-        var userId = GetUserKey();
+        var userId = User.GetAgentUserKey();
         var chat = await db.AgentChat
             .FirstOrDefaultAsync(c => c.UserId == userId && c.ChatKey == chatKey, ct);
 
@@ -71,7 +72,7 @@ public partial class AgentChatController(
         var title = (request.Title ?? string.Empty).Trim();
         if (title.Length > 200) title = title[..200];
 
-        var userId = GetUserKey();
+        var userId = User.GetAgentUserKey();
         var existing = await db.AgentChat
             .FirstOrDefaultAsync(c => c.UserId == userId && c.ChatKey == chatKey, ct);
 
@@ -115,7 +116,7 @@ public partial class AgentChatController(
         if (transcriptJson.Length + (request.Summary?.Length ?? 0) + (request.Goal?.Length ?? 0) > MaxCombinedTextChars)
             return Ok(new AgentChatSaveResponse("The chat is too large to store."));
 
-        var userId = GetUserKey();
+        var userId = User.GetAgentUserKey();
         var existing = await db.AgentTask
             .FirstOrDefaultAsync(t => t.UserId == userId && t.ChatKey == chatKey && t.TaskSeq == taskSeq, ct);
 
@@ -167,7 +168,7 @@ public partial class AgentChatController(
         if (!ChatKeyRegex().IsMatch(chatKey))
             return Ok(new AgentChatSaveResponse("The chat key is not valid."));
 
-        var userId = GetUserKey();
+        var userId = User.GetAgentUserKey();
         var chat = await db.AgentChat.FirstOrDefaultAsync(c => c.UserId == userId && c.ChatKey == chatKey, ct);
         if (chat != null) db.AgentChat.Remove(chat);
 
@@ -176,14 +177,6 @@ public partial class AgentChatController(
 
         await db.SaveChangesAsync(ct);
         return Ok(new AgentChatSaveResponse(null));
-    }
-
-    private string GetUserKey()
-    {
-        return User.FindFirstValue(ClaimTypes.NameIdentifier)
-               ?? User.Identity?.Name
-               ?? HttpContext.Connection.RemoteIpAddress?.ToString()
-               ?? "anonymous";
     }
 
     public sealed record AgentChatSummaryDto(string ChatKey, string Title, DateTime UpdatedDate);

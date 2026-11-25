@@ -172,16 +172,20 @@ window.crmAgentDriver = (function () {
         const popovers = Array.from(document.querySelectorAll('.mud-popover-open')).filter(isVisible);
         const options = [];
         popovers.forEach(p => {
-            p.querySelectorAll('.mud-list-item').forEach((item, idx) => {
-                if (!isVisible(item)) return;
-                options.push({ index: idx + 1, text: cleanText(item.innerText) });
-            });
+            Array.from(p.querySelectorAll('.mud-list-item'))
+                .filter(isVisible)
+                .forEach(item => {
+                    options.push({ index: options.length + 1, text: cleanText(item.innerText) });
+                });
         });
         return options.slice(0, 30);
     }
 
     function captureVisibleText() {
-        const root = document.querySelector('.mud-main-content') || document.body;
+        const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
+        const root = (dialogs.length > 0 ? dialogs[dialogs.length - 1] : null)
+            || document.querySelector('.mud-main-content')
+            || document.body;
         const clone = root.cloneNode(true);
         clone.querySelectorAll('[data-agent-panel="true"], script, style').forEach(el => el.remove());
         const text = (clone.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
@@ -311,7 +315,10 @@ window.crmAgentDriver = (function () {
     }
 
     function readGridHeaders(find) {
-        const root = document.querySelector('.mud-main-content') || document.body;
+        const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
+        const root = (dialogs.length > 0 ? dialogs[dialogs.length - 1] : null)
+            || document.querySelector('.mud-main-content')
+            || document.body;
         const tables = Array.from(root.querySelectorAll('.mud-table-root')).filter(isVisible);
         const headers = tables.flatMap(t => Array.from(t.querySelectorAll('thead th')).map(th => cleanText(th.innerText)).filter(Boolean));
         if (find) {
@@ -320,6 +327,23 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: true, find, found: matches.length > 0, matches, headers });
         }
         return JSON.stringify({ ok: true, headers });
+    }
+
+    function getNavRoutes() {
+        const links = Array.from(document.querySelectorAll('.mud-nav-menu a.mud-nav-link'));
+        const seen = new Set();
+        const routes = [];
+        links.forEach(a => {
+            const href = a.getAttribute('href');
+            const text = cleanText(a.innerText);
+            if (!href || href.startsWith('http') || href === '#') return;
+            const normHref = href.startsWith('/') ? href : '/' + href;
+            const key = normHref + '|' + text;
+            if (seen.has(key)) return;
+            seen.add(key);
+            routes.push({ href: normHref, text });
+        });
+        return JSON.stringify(routes);
     }
 
     function waitForSettle(maxMs) {
@@ -354,6 +378,7 @@ window.crmAgentDriver = (function () {
         selectTab,
         selectGridRow,
         readGridHeaders,
+        getNavRoutes,
         waitForSettle
     };
 })();

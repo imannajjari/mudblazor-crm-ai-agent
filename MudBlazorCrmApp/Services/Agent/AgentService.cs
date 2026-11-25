@@ -221,7 +221,16 @@ public sealed class AgentService(
             });
         }
 
-        using var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsRaw) ? "{}" : argsRaw);
+        JsonDocument argsDoc;
+        try
+        {
+            argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsRaw) ? "{}" : argsRaw);
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(new { ok = false, error = "Invalid JSON tool arguments." });
+        }
+        using var _ = argsDoc;
         var args = argsDoc.RootElement;
 
         switch (name)
@@ -338,10 +347,17 @@ public sealed class AgentService(
         string? answerText = null;
         if (!string.IsNullOrWhiteSpace(result.AssistantJson))
         {
-            using var doc = JsonDocument.Parse(result.AssistantJson);
-            if (doc.RootElement.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.String)
+            try
             {
-                answerText = contentEl.GetString();
+                using var doc = JsonDocument.Parse(result.AssistantJson);
+                if (doc.RootElement.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.String)
+                {
+                    answerText = contentEl.GetString();
+                }
+            }
+            catch (JsonException)
+            {
+                return new AgentLookResponseModel { Error = "Model returned invalid JSON.", Usage = result.Usage };
             }
         }
 

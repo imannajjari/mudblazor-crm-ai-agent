@@ -11,6 +11,8 @@ public class AgentOptions
     public string? ApiKey { get; set; }
     public int MaxCallsPerUserPerMinute { get; set; } = 60;
     public int MaxTaskModelCalls { get; set; } = 40;
+    public int MaxTaskSteps { get; set; } = 25;
+    public int MaxPriorTurns { get; set; } = 80;
     public decimal MaxTaskCostUsd { get; set; } = 0.80m;
     public int TimeoutSeconds { get; set; } = 90;
     public decimal InputPricePerMillionTokensUsd { get; set; } = 0.10m;
@@ -32,6 +34,10 @@ public class AgentOptions
             MaxCallsPerUserPerMinute = 60;
         if (MaxTaskModelCalls <= 0 || MaxTaskModelCalls > 100)
             MaxTaskModelCalls = 40;
+        if (MaxTaskSteps <= 0 || MaxTaskSteps > 100)
+            MaxTaskSteps = 25;
+        if (MaxPriorTurns <= 0 || MaxPriorTurns > 200)
+            MaxPriorTurns = 80;
         if (MaxTaskCostUsd <= 0 || MaxTaskCostUsd > 20m)
             MaxTaskCostUsd = 0.80m;
         if (TimeoutSeconds <= 0 || TimeoutSeconds > 300)

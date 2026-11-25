@@ -58,7 +58,9 @@ public sealed class AgentDataService(
         if (httpCtx == null)
             return JsonSerializer.Serialize(new { ok = false, error = "No HTTP context for loopback read." });
 
-        var baseUri = $"{httpCtx.Request.Scheme}://{httpCtx.Request.Host}";
+        // Always target local loopback port rather than trusting an arbitrary Host header
+        var localPort = httpCtx.Connection.LocalPort > 0 ? httpCtx.Connection.LocalPort : 5025;
+        var baseUri = $"http://127.0.0.1:{localPort}";
         string relativeUri;
         if (!def.IsOData)
         {

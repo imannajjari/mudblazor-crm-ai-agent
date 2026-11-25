@@ -45,4 +45,6 @@ public class AgentLookResponseModel
 public class AgentStatusModel
 {
     public bool UseAgent { get; set; }
+    public int MaxTaskSteps { get; set; } = 25;
+    public int MaxPriorTurns { get; set; } = 80;
 }

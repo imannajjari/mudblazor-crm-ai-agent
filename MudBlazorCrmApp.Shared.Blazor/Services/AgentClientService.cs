@@ -23,80 +23,6 @@ public sealed class AgentClientService(
     AuthenticationStateProvider authenticationStateProvider,
     AppText appText)
 {
-    private const int MaxSteps = 25;
-
-    private static readonly Dictionary<string, string> PageRoutes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["dashboard"] = "/crmdashboard",
-        ["داشبورد"] = "/crmdashboard",
-        ["crmdashboard"] = "/crmdashboard",
-        ["pipeline"] = "/pipeline",
-        ["پایپ‌لاین"] = "/pipeline",
-        ["بورد پایپ‌لاین"] = "/pipeline",
-        ["calendar"] = "/calendar",
-        ["تقویم"] = "/calendar",
-        ["leads"] = "/Lead",
-        ["lead"] = "/Lead",
-        ["سرنخ‌ها"] = "/Lead",
-        ["سرنخ"] = "/Lead",
-        ["opportunities"] = "/Opportunity",
-        ["opportunity"] = "/Opportunity",
-        ["فرصت‌ها"] = "/Opportunity",
-        ["فرصت"] = "/Opportunity",
-        ["sales"] = "/Sale",
-        ["sale"] = "/Sale",
-        ["فروش"] = "/Sale",
-        ["فروش‌ها"] = "/Sale",
-        ["activities"] = "/Activity",
-        ["activity"] = "/Activity",
-        ["فعالیت‌ها"] = "/Activity",
-        ["فعالیت"] = "/Activity",
-        ["customers"] = "/Customer",
-        ["customer"] = "/Customer",
-        ["companies"] = "/Customer",
-        ["مشتریان"] = "/Customer",
-        ["شرکت‌ها"] = "/Customer",
-        ["contacts"] = "/Contact",
-        ["contact"] = "/Contact",
-        ["مخاطبین"] = "/Contact",
-        ["addresses"] = "/Address",
-        ["address"] = "/Address",
-        ["آدرس‌ها"] = "/Address",
-        ["products"] = "/Product",
-        ["product"] = "/Product",
-        ["محصولات"] = "/Product",
-        ["services"] = "/Service",
-        ["service"] = "/Service",
-        ["خدمات"] = "/Service",
-        ["vendors"] = "/Vendor",
-        ["vendor"] = "/Vendor",
-        ["تامین‌کنندگان"] = "/Vendor",
-        ["support"] = "/SupportCase",
-        ["support cases"] = "/SupportCase",
-        ["supportcase"] = "/SupportCase",
-        ["تیکت‌ها"] = "/SupportCase",
-        ["تیکت‌های پشتیبانی"] = "/SupportCase",
-        ["communications"] = "/communication",
-        ["ارتباطات"] = "/communication",
-        ["tasks"] = "/TodoTask",
-        ["todotask"] = "/TodoTask",
-        ["وظایف"] = "/TodoTask",
-        ["لیست وظایف"] = "/TodoTask",
-        ["kanban"] = "/KanbanTodoTask",
-        ["کانبان"] = "/KanbanTodoTask",
-        ["rewards"] = "/Reward",
-        ["پاداش‌ها"] = "/Reward",
-        ["tags"] = "/Tag",
-        ["برچسب‌ها"] = "/Tag",
-        ["reports"] = "/reports",
-        ["گزارش‌ها"] = "/reports",
-        ["import"] = "/import",
-        ["email templates"] = "/emailtemplate",
-        ["users"] = "/user",
-        ["کاربران"] = "/user",
-        ["audit log"] = "/auditlog"
-    };
-
     public event Action? OnStateChanged;
 
     private bool _isDrawerOpen;
@@ -128,6 +54,11 @@ public sealed class AgentClientService(
     public int TotalInputTokens { get; private set; }
     public int TotalOutputTokens { get; private set; }
     public decimal TotalCost { get; private set; }
+    public int MaxTaskSteps { get; private set; } = 25;
+    public int MaxPriorTurns { get; private set; } = 80;
+    public decimal MaxTaskCostUsd { get; private set; } = 0.80m;
+    public int MaxTaskModelCalls { get; private set; } = 40;
+    private int _taskSeqCounter;
 
     private TaskCompletionSource<string>? _userAnswerTcs;
     private TaskCompletionSource<PermissionDecision>? _permissionTcs;
@@ -142,6 +73,11 @@ public sealed class AgentClientService(
         try
         {
             var res = await httpClient.GetFromJsonAsync<AgentStatusDto>("/api/agent/status");
+            if (res != null)
+            {
+                if (res.MaxTaskSteps > 0) MaxTaskSteps = res.MaxTaskSteps;
+                if (res.MaxPriorTurns > 0) MaxPriorTurns = res.MaxPriorTurns;
+            }
             return res?.UseAgent ?? false;
         }
         catch
@@ -273,19 +209,21 @@ public sealed class AgentClientService(
         _declinedActions.Clear();
         _ledger.Clear();
 
-        Entries.Add(new AgentChatEntry("user", goal));
-        NotifyChanged();
-
         var taskStart = DateTimeOffset.UtcNow;
         var lastSummary = string.Empty;
         var messages = new List<string>();
+
+        // Collect prior turns BEFORE appending the current goal so it is never sent twice
+        var priorTurns = Entries
+            .Where(e => e.Kind is "user" or "assistant")
+            .TakeLast(MaxPriorTurns)
+            .ToList();
+
+        Entries.Add(new AgentChatEntry("user", goal));
+        NotifyChanged();
+
         try
         {
-            // Include recent conversation history (user/assistant turns) so the agent remembers earlier tasks in this chat
-            var priorTurns = Entries
-                .Where(e => e.Kind is "user" or "assistant")
-                .TakeLast(10)
-                .ToList();
             foreach (var turn in priorTurns)
             {
                 messages.Add(JsonSerializer.Serialize(new
@@ -304,9 +242,15 @@ public sealed class AgentClientService(
                 })
             );
 
-            for (var step = 0; step < MaxSteps; step++)
+            for (var step = 0; step < MaxTaskSteps; step++)
             {
                 ct.ThrowIfCancellationRequested();
+
+                if (TotalCalls >= MaxTaskModelCalls || TotalCost >= MaxTaskCostUsd)
+                {
+                    Entries.Add(new AgentChatEntry("info", $"Task budget reached (calls: {TotalCalls}/{MaxTaskModelCalls}, cost: ${TotalCost:0.0000}/${MaxTaskCostUsd:0.00})."));
+                    break;
+                }
 
                 var stepRes = await PostStepAsync(messages, ct);
                 if (stepRes == null)
@@ -315,6 +259,8 @@ public sealed class AgentClientService(
                     break;
                 }
 
+                if (stepRes.MaxTaskCostUsd is > 0) MaxTaskCostUsd = stepRes.MaxTaskCostUsd.Value;
+                if (stepRes.MaxTaskModelCalls is > 0) MaxTaskModelCalls = stepRes.MaxTaskModelCalls.Value;
                 AccumulateUsage(stepRes.Usage);
 
                 if (!string.IsNullOrWhiteSpace(stepRes.Error))
@@ -431,7 +377,7 @@ public sealed class AgentClientService(
             await AttachBearerIfPresentAsync(chatReq);
             await httpClient.SendAsync(chatReq);
 
-            var taskSeq = (int)Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeSeconds() % int.MaxValue);
+            var taskSeq = Interlocked.Increment(ref _taskSeqCounter);
             using var taskReq = new HttpRequestMessage(HttpMethod.Put, $"/api/agentchat/{CurrentChatKey}/tasks/{taskSeq}")
             {
                 Content = JsonContent.Create(new
@@ -474,14 +420,14 @@ public sealed class AgentClientService(
             case "go_to_page":
             {
                 var target = args.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                var route = ResolveRoute(target);
+                var (route, available) = await ResolveRouteAsync(target, ct);
                 if (route == null)
                 {
                     return (JsonSerializer.Serialize(new
                     {
                         ok = false,
                         error = $"Unknown page '{target}'.",
-                        availableRoutes = PageRoutes.Values.Distinct().OrderBy(x => x).ToArray()
+                        availableRoutes = available
                     }), false, null);
                 }
 
@@ -621,7 +567,7 @@ public sealed class AgentClientService(
             case "lookup_term":
             {
                 var term = args.TryGetProperty("term", out var t) ? t.GetString() ?? "" : "";
-                var route = ResolveRoute(term);
+                var (route, _) = await ResolveRouteAsync(term, ct);
                 return (JsonSerializer.Serialize(new { ok = true, term, mappedRoute = route, translated = appText[term] }), false, null);
             }
 
@@ -712,23 +658,39 @@ public sealed class AgentClientService(
         return $"{summary}\n\n---\n**Actions executed:** {string.Join(" → ", _ledger)}";
     }
 
-    private static string? ResolveRoute(string input)
+    private async Task<(string? Route, NavRouteDto[] Available)> ResolveRouteAsync(string input, CancellationToken ct)
     {
         var key = input.Trim();
-        if (string.IsNullOrEmpty(key)) return null;
-        if (key.StartsWith('/')) return key;
-        if (PageRoutes.TryGetValue(key, out var exact)) return exact;
+        var available = await GetNavRoutesAsync(ct);
+        if (string.IsNullOrEmpty(key)) return (null, available);
+        if (key.StartsWith('/')) return (key, available);
 
-        foreach (var pair in PageRoutes)
-        {
-            if (pair.Key.Contains(key, StringComparison.OrdinalIgnoreCase) ||
-                key.Contains(pair.Key, StringComparison.OrdinalIgnoreCase))
-            {
-                return pair.Value;
-            }
-        }
-        return null;
+        var exact = available.FirstOrDefault(r =>
+            string.Equals(r.Text, key, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(r.Href.TrimStart('/'), key, StringComparison.OrdinalIgnoreCase));
+        if (exact != null) return (exact.Href, available);
+
+        var partial = available.FirstOrDefault(r =>
+            r.Text.Contains(key, StringComparison.OrdinalIgnoreCase) ||
+            key.Contains(r.Text, StringComparison.OrdinalIgnoreCase) ||
+            r.Href.TrimStart('/').Contains(key, StringComparison.OrdinalIgnoreCase));
+        return (partial?.Href, available);
     }
+
+    private async Task<NavRouteDto[]> GetNavRoutesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var json = await jsRuntime.InvokeAsync<string>("crmAgentDriver.getNavRoutes", ct);
+            return JsonSerializer.Deserialize<NavRouteDto[]>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record NavRouteDto(string Href, string Text);
 
     private async Task<string> CaptureSnapshotAsync()
     {
@@ -836,6 +798,8 @@ public sealed class AgentClientService(
     private sealed class AgentStatusDto
     {
         public bool UseAgent { get; set; }
+        public int MaxTaskSteps { get; set; } = 25;
+        public int MaxPriorTurns { get; set; } = 80;
     }
 
     private sealed class AgentStepResponseDto
@@ -845,6 +809,8 @@ public sealed class AgentClientService(
         public List<string>? ServerToolResults { get; set; }
         public AgentUsageDto? Usage { get; set; }
         public string? Error { get; set; }
+        public decimal? MaxTaskCostUsd { get; set; }
+        public int? MaxTaskModelCalls { get; set; }
     }
 
     private sealed class AgentLookResponseDto
