@@ -9,6 +9,13 @@ using MudBlazorCrmApp.Shared.Blazor.Authorization;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services;
 
+public enum AgentMode
+{
+    Manual,
+    SemiAuto,
+    Auto
+}
+
 public sealed class AgentClientService(
     HttpClient httpClient,
     IJSRuntime jsRuntime,
@@ -16,7 +23,7 @@ public sealed class AgentClientService(
     AuthenticationStateProvider authenticationStateProvider,
     AppText appText)
 {
-    private const int MaxSteps = 20;
+    private const int MaxSteps = 25;
 
     private static readonly Dictionary<string, string> PageRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -105,16 +112,27 @@ public sealed class AgentClientService(
             }
         }
     }
+
+    public AgentMode Mode { get; set; } = AgentMode.Manual;
     public bool IsRunning { get; private set; }
     public bool WaitingForUserAnswer { get; private set; }
     public string? PendingQuestion { get; private set; }
+    public bool WaitingForPermission { get; private set; }
+    public string? PendingPermissionLabel { get; private set; }
+    public string? PendingPermissionRisk { get; private set; }
+
     public List<AgentChatEntry> Entries { get; } = [];
     public int TotalCalls { get; private set; }
     public int TotalInputTokens { get; private set; }
     public int TotalOutputTokens { get; private set; }
 
     private TaskCompletionSource<string>? _userAnswerTcs;
+    private TaskCompletionSource<PermissionDecision>? _permissionTcs;
     private CancellationTokenSource? _cts;
+    private readonly HashSet<string> _alwaysAllowedActions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _declinedActions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _ledger = [];
+    private string _latestSnapshotJson = "{}";
 
     public async Task<bool> IsEnabledAsync()
     {
@@ -138,6 +156,12 @@ public sealed class AgentClientService(
         TotalOutputTokens = 0;
         WaitingForUserAnswer = false;
         PendingQuestion = null;
+        WaitingForPermission = false;
+        PendingPermissionLabel = null;
+        PendingPermissionRisk = null;
+        _alwaysAllowedActions.Clear();
+        _declinedActions.Clear();
+        _ledger.Clear();
         NotifyChanged();
     }
 
@@ -145,6 +169,7 @@ public sealed class AgentClientService(
     {
         _cts?.Cancel();
         _userAnswerTcs?.TrySetCanceled();
+        _permissionTcs?.TrySetCanceled();
     }
 
     public void SubmitUserAnswer(string answer)
@@ -159,6 +184,18 @@ public sealed class AgentClientService(
         }
     }
 
+    public void ResolvePermission(PermissionDecision decision)
+    {
+        if (WaitingForPermission && _permissionTcs != null)
+        {
+            WaitingForPermission = false;
+            PendingPermissionLabel = null;
+            PendingPermissionRisk = null;
+            NotifyChanged();
+            _permissionTcs.TrySetResult(decision);
+        }
+    }
+
     public async Task SendTaskAsync(string goal)
     {
         if (string.IsNullOrWhiteSpace(goal) || IsRunning) return;
@@ -166,19 +203,21 @@ public sealed class AgentClientService(
         IsRunning = true;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
+        _declinedActions.Clear();
+        _ledger.Clear();
 
         Entries.Add(new AgentChatEntry("user", goal));
         NotifyChanged();
 
         try
         {
-            var initialSnapshot = await CaptureSnapshotAsync();
+            _latestSnapshotJson = await CaptureSnapshotAsync();
             var messages = new List<string>
             {
                 JsonSerializer.Serialize(new
                 {
                     role = "user",
-                    content = $"Goal: {goal}\nDate: {DateTime.Now:yyyy-MM-dd}\nCurrent screen snapshot:\n{initialSnapshot}"
+                    content = $"Goal: {goal}\nDate: {DateTime.Now:yyyy-MM-dd}\nCurrent screen snapshot:\n{_latestSnapshotJson}"
                 })
             };
 
@@ -229,7 +268,7 @@ public sealed class AgentClientService(
                     var text = msgEl.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String
                         ? c.GetString()
                         : string.Empty;
-                    Entries.Add(new AgentChatEntry("assistant", text ?? string.Empty));
+                    Entries.Add(new AgentChatEntry("assistant", AppendLedger(text ?? string.Empty)));
                     break;
                 }
 
@@ -262,7 +301,7 @@ public sealed class AgentClientService(
 
                     if (isFinish)
                     {
-                        Entries.Add(new AgentChatEntry("assistant", finishSummary ?? string.Empty));
+                        Entries.Add(new AgentChatEntry("assistant", AppendLedger(finishSummary ?? string.Empty)));
                         finished = true;
                         break;
                     }
@@ -285,6 +324,9 @@ public sealed class AgentClientService(
             IsRunning = false;
             WaitingForUserAnswer = false;
             PendingQuestion = null;
+            WaitingForPermission = false;
+            PendingPermissionLabel = null;
+            PendingPermissionRisk = null;
             _cts?.Dispose();
             _cts = null;
             NotifyChanged();
@@ -304,8 +346,8 @@ public sealed class AgentClientService(
             case "scan_screen":
             {
                 await jsRuntime.InvokeVoidAsync("crmAgentDriver.waitForSettle", ct, 800);
-                var snap = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { ok = true, snapshot = JsonNode.Parse(snap) }), false, null);
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { ok = true, snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
             }
 
             case "go_to_page":
@@ -324,16 +366,113 @@ public sealed class AgentClientService(
 
                 navigationManager.NavigateTo(route);
                 await jsRuntime.InvokeVoidAsync("crmAgentDriver.waitForSettle", ct, 1500);
-                var snap = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { ok = true, navigatedTo = route, snapshot = JsonNode.Parse(snap) }), false, null);
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { ok = true, navigatedTo = route, snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
             }
 
             case "select_tab":
             {
                 var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
                 var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectTab", ct, id);
-                var snap = await CaptureSnapshotAsync();
-                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(snap) }), false, null);
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
+            }
+
+            case "set_field":
+            {
+                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var val = args.TryGetProperty("value", out var vEl) ? vEl.GetString() ?? "" : "";
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.setField", ct, id, val);
+                _ledger.Add($"set_field({id} = \"{val}\")");
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
+            }
+
+            case "open_combo":
+            {
+                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.openCombo", ct, id);
+                return (res, false, null);
+            }
+
+            case "pick_option":
+            {
+                var opt = args.TryGetProperty("option", out var oEl) ? oEl.GetString() ?? "" : "";
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.pickOption", ct, opt);
+                _ledger.Add($"pick_option(\"{opt}\")");
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
+            }
+
+            case "close_combo":
+            {
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.closeCombo", ct);
+                return (res, false, null);
+            }
+
+            case "click_action":
+            {
+                var id = args.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var targetName = args.TryGetProperty("targetName", out var tEl) ? tEl.GetString() : null;
+                var (actionText, risk) = LookupActionFromSnapshot(id);
+
+                if (_declinedActions.Contains(actionText))
+                {
+                    return (JsonSerializer.Serialize(new
+                    {
+                        ok = false,
+                        blocked = true,
+                        declined = true,
+                        reason = $"User previously declined '{actionText}'. Do not retry."
+                    }), false, null);
+                }
+
+                var needsPermission = risk switch
+                {
+                    "destructive" => Mode != AgentMode.Auto || string.IsNullOrWhiteSpace(targetName),
+                    "save" => Mode != AgentMode.Auto && !_alwaysAllowedActions.Contains(actionText),
+                    _ => false
+                };
+
+                if (needsPermission)
+                {
+                    var label = string.IsNullOrWhiteSpace(targetName) ? actionText : $"{actionText}: {targetName}";
+                    var decision = await AskPermissionAsync(label, risk, ct);
+                    if (decision == PermissionDecision.Deny)
+                    {
+                        _declinedActions.Add(actionText);
+                        return (JsonSerializer.Serialize(new
+                        {
+                            ok = false,
+                            declined = true,
+                            reason = $"User declined '{label}'. Do not retry."
+                        }), false, null);
+                    }
+                    if (decision == PermissionDecision.AllowAlways && risk != "destructive")
+                    {
+                        _alwaysAllowedActions.Add(actionText);
+                    }
+                }
+
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.clickAction", ct, id);
+                _ledger.Add($"click_action({actionText} [{risk}])");
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
+            }
+
+            case "read_grid_headers":
+            {
+                var find = args.TryGetProperty("find", out var fEl) ? fEl.GetString() : null;
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.readGridHeaders", ct, find);
+                return (res, false, null);
+            }
+
+            case "select_grid_row":
+            {
+                var rowId = args.TryGetProperty("rowId", out var rEl) ? rEl.GetString() ?? "" : "";
+                var res = await jsRuntime.InvokeAsync<string>("crmAgentDriver.selectGridRow", ct, rowId);
+                _latestSnapshotJson = await CaptureSnapshotAsync();
+                return (JsonSerializer.Serialize(new { result = JsonNode.Parse(res), snapshot = JsonNode.Parse(_latestSnapshotJson) }), false, null);
             }
 
             case "look_at_screen":
@@ -378,8 +517,48 @@ public sealed class AgentClientService(
             }
 
             default:
-                return (JsonSerializer.Serialize(new { ok = false, error = $"Tool '{name}' is not available in Phase 1 (read-only)." }), false, null);
+                return (JsonSerializer.Serialize(new { ok = false, error = $"Unknown tool '{name}'." }), false, null);
         }
+    }
+
+    private async Task<PermissionDecision> AskPermissionAsync(string label, string risk, CancellationToken ct)
+    {
+        PendingPermissionLabel = label;
+        PendingPermissionRisk = risk;
+        WaitingForPermission = true;
+        _permissionTcs = new TaskCompletionSource<PermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
+        NotifyChanged();
+
+        using var reg = ct.Register(() => _permissionTcs.TrySetCanceled(ct));
+        return await _permissionTcs.Task;
+    }
+
+    private (string Text, string Risk) LookupActionFromSnapshot(string id)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(_latestSnapshotJson);
+            if (doc.RootElement.TryGetProperty("actions", out var actionsEl))
+            {
+                foreach (var a in actionsEl.EnumerateArray())
+                {
+                    if (a.TryGetProperty("id", out var idEl) && idEl.GetString() == id)
+                    {
+                        var txt = a.TryGetProperty("text", out var t) ? t.GetString() ?? id : id;
+                        var risk = a.TryGetProperty("risk", out var r) ? r.GetString() ?? "save" : "save";
+                        return (txt, risk);
+                    }
+                }
+            }
+        }
+        catch { }
+        return (id, "save");
+    }
+
+    private string AppendLedger(string summary)
+    {
+        if (_ledger.Count == 0) return summary;
+        return $"{summary}\n\n---\n**Actions executed:** {string.Join(" → ", _ledger)}";
     }
 
     private static string? ResolveRoute(string input)
@@ -489,6 +668,13 @@ public sealed class AgentClientService(
     }
 
     private void NotifyChanged() => OnStateChanged?.Invoke();
+
+    public enum PermissionDecision
+    {
+        AllowOnce,
+        AllowAlways,
+        Deny
+    }
 
     public sealed record AgentChatEntry(string Kind, string Text);
 

@@ -1,5 +1,18 @@
 window.crmAgentDriver = (function () {
     const elementMap = new Map();
+    let activeRequests = 0;
+
+    // Hook fetch to track in-flight HTTP requests for save settle
+    if (!window.__crmAgentFetchHooked) {
+        window.__crmAgentFetchHooked = true;
+        const origFetch = window.fetch;
+        window.fetch = function () {
+            activeRequests++;
+            return origFetch.apply(this, arguments).finally(() => {
+                activeRequests = Math.max(0, activeRequests - 1);
+            });
+        };
+    }
 
     function isExcluded(el) {
         return !!(el && el.closest && el.closest('[data-agent-panel="true"]'));
@@ -19,9 +32,10 @@ window.crmAgentDriver = (function () {
 
     function classifyRisk(label) {
         const t = (label || '').toLowerCase();
-        if (t.includes('delete') || t.includes('remove') || t.includes('حذف')) return 'destructive';
+        if (t.includes('delete') || t.includes('remove') || t.includes('void') || t.includes('حذف')) return 'destructive';
         if (t.includes('save') || t.includes('submit') || t.includes('add') || t.includes('create') ||
-            t.includes('update') || t.includes('ذخیره') || t.includes('ثبت') || t.includes('افزودن') || t.includes('ویرایش')) {
+            t.includes('update') || t.includes('ok') || t.includes('ذخیره') || t.includes('ثبت') ||
+            t.includes('افزودن') || t.includes('ویرایش') || t.includes('تایید')) {
             return 'save';
         }
         return 'read';
@@ -61,12 +75,14 @@ window.crmAgentDriver = (function () {
             const labelEl = ctrl.querySelector('label.mud-input-label');
             const label = cleanText(labelEl ? labelEl.innerText : (input.getAttribute('placeholder') || input.getAttribute('aria-label') || ''));
             const id = 'f' + (fieldIdx++);
-            elementMap.set(id, input);
+            const isSelect = !!ctrl.closest('.mud-select');
+            elementMap.set(id, isSelect ? ctrl.closest('.mud-select') : input);
             fields.push({
                 id,
                 label: label || id,
-                kind: ctrl.closest('.mud-select') ? 'select' : (input.tagName === 'TEXTAREA' ? 'textarea' : (input.type || 'text')),
+                kind: isSelect ? 'select' : (input.tagName === 'TEXTAREA' ? 'textarea' : (input.type || 'text')),
                 value: input.value || '',
+                maxLength: input.maxLength > 0 ? input.maxLength : null,
                 required: input.hasAttribute('required') || ctrl.classList.contains('mud-input-required'),
                 invalid: ctrl.classList.contains('mud-input-error') || input.getAttribute('aria-invalid') === 'true',
                 disabled: input.disabled || input.readOnly
@@ -85,20 +101,24 @@ window.crmAgentDriver = (function () {
 
             const allRows = Array.from(table.querySelectorAll('tbody tr'));
             const maxRows = 15;
-            const rows = allRows.slice(0, maxRows).map(tr =>
-                Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText))
-            );
+            const rows = allRows.slice(0, maxRows).map((tr, rIdx) => {
+                const rowId = 'r' + gridIdx + '_' + (rIdx + 1);
+                elementMap.set(rowId, tr);
+                return {
+                    rowId,
+                    cells: Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText))
+                };
+            });
 
             const footerEl = container ? container.querySelector('.mud-table-pagination-caption') : null;
-            const gridObj = {
+            grids.push({
                 id: 'g' + (gridIdx++),
                 headers,
                 rows,
                 rowsShown: rows.length,
                 rowsCut: allRows.length > maxRows,
                 footerCount: footerEl ? cleanText(footerEl.innerText) : null
-            };
-            grids.push(gridObj);
+            });
         });
 
         // Actions
@@ -120,6 +140,9 @@ window.crmAgentDriver = (function () {
             });
         });
 
+        // Open combo options (if any popover is open)
+        const lookupOptions = getOpenComboOptions();
+
         // Errors & Toasts
         const errors = Array.from(root.querySelectorAll('.mud-input-error .mud-input-helper-text, .validation-message'))
             .filter(isVisible)
@@ -139,9 +162,22 @@ window.crmAgentDriver = (function () {
             fields: fields.slice(0, 40),
             grids,
             actions: actions.slice(0, 40),
+            lookupOptions,
             errors,
             toasts
         });
+    }
+
+    function getOpenComboOptions() {
+        const popovers = Array.from(document.querySelectorAll('.mud-popover-open')).filter(isVisible);
+        const options = [];
+        popovers.forEach(p => {
+            p.querySelectorAll('.mud-list-item').forEach((item, idx) => {
+                if (!isVisible(item)) return;
+                options.push({ index: idx + 1, text: cleanText(item.innerText) });
+            });
+        });
+        return options.slice(0, 30);
     }
 
     function captureVisibleText() {
@@ -150,6 +186,107 @@ window.crmAgentDriver = (function () {
         clone.querySelectorAll('[data-agent-panel="true"], script, style').forEach(el => el.remove());
         const text = (clone.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
         return text.slice(0, 30000);
+    }
+
+    async function setField(id, value) {
+        const el = elementMap.get(id);
+        if (!el || !document.contains(el)) {
+            return JSON.stringify({ ok: false, error: 'Field id not found in current view: ' + id });
+        }
+
+        const input = el.matches('input, textarea') ? el : el.querySelector('input.mud-input-slot, textarea.mud-input-slot');
+        if (!input) {
+            return JSON.stringify({ ok: false, error: 'Input element not found for id: ' + id });
+        }
+        if (input.disabled || input.readOnly) {
+            return JSON.stringify({ ok: false, error: 'Field is disabled or read-only: ' + id });
+        }
+
+        const strVal = value == null ? '' : String(value);
+        if (input.maxLength > 0 && strVal.length > input.maxLength) {
+            return JSON.stringify({ ok: false, error: `Value exceeds maxLength (${input.maxLength}).` });
+        }
+
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+            input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+            'value'
+        )?.set;
+        if (nativeSetter) {
+            nativeSetter.call(input, strVal);
+        } else {
+            input.value = strVal;
+        }
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.blur();
+
+        await waitForSettle(400);
+        return JSON.stringify({ ok: true, id, fieldValue: input.value });
+    }
+
+    async function openCombo(id) {
+        const el = elementMap.get(id);
+        if (!el || !document.contains(el)) {
+            return JSON.stringify({ ok: false, error: 'Combo id not found: ' + id });
+        }
+        const target = el.querySelector('.mud-input-slot') || el;
+        target.click();
+        await waitForSettle(500);
+        const options = getOpenComboOptions();
+        return JSON.stringify({ ok: true, id, lookupOptions: options });
+    }
+
+    async function pickOption(optionTextOrIndex) {
+        const popovers = Array.from(document.querySelectorAll('.mud-popover-open')).filter(isVisible);
+        const items = [];
+        popovers.forEach(p => {
+            p.querySelectorAll('.mud-list-item').forEach(item => {
+                if (isVisible(item)) items.push(item);
+            });
+        });
+
+        if (items.length === 0) {
+            return JSON.stringify({ ok: false, error: 'No open combo options found. Call open_combo first.' });
+        }
+
+        let match = null;
+        if (typeof optionTextOrIndex === 'number' || /^\d+$/.test(String(optionTextOrIndex))) {
+            const idx = Number(optionTextOrIndex) - 1;
+            if (idx >= 0 && idx < items.length) match = items[idx];
+        } else {
+            const q = cleanText(String(optionTextOrIndex)).toLowerCase();
+            match = items.find(i => cleanText(i.innerText).toLowerCase() === q)
+                || items.find(i => cleanText(i.innerText).toLowerCase().includes(q));
+        }
+
+        if (!match) {
+            return JSON.stringify({ ok: false, error: 'Option not found: ' + optionTextOrIndex });
+        }
+
+        const chosenText = cleanText(match.innerText);
+        match.click();
+        await waitForSettle(500);
+        return JSON.stringify({ ok: true, picked: chosenText });
+    }
+
+    async function closeCombo() {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await waitForSettle(300);
+        return JSON.stringify({ ok: true });
+    }
+
+    async function clickAction(id) {
+        const el = elementMap.get(id);
+        if (!el || !document.contains(el)) {
+            return JSON.stringify({ ok: false, error: 'Action id not found: ' + id });
+        }
+        if (el.disabled || el.classList.contains('mud-disabled')) {
+            return JSON.stringify({ ok: false, error: 'Action is disabled: ' + id });
+        }
+        const label = cleanText(el.innerText || el.getAttribute('title') || id);
+        el.click();
+        await waitForSettle(1500);
+        return JSON.stringify({ ok: true, id, clicked: label });
     }
 
     async function selectTab(id) {
@@ -162,12 +299,34 @@ window.crmAgentDriver = (function () {
         return JSON.stringify({ ok: true, id });
     }
 
+    async function selectGridRow(rowId) {
+        const el = elementMap.get(rowId);
+        if (!el || !document.contains(el)) {
+            return JSON.stringify({ ok: false, error: 'Grid row id not found: ' + rowId });
+        }
+        el.click();
+        await waitForSettle(400);
+        return JSON.stringify({ ok: true, rowId });
+    }
+
+    function readGridHeaders(find) {
+        const root = document.querySelector('.mud-main-content') || document.body;
+        const tables = Array.from(root.querySelectorAll('.mud-table-root')).filter(isVisible);
+        const headers = tables.flatMap(t => Array.from(t.querySelectorAll('thead th')).map(th => cleanText(th.innerText)).filter(Boolean));
+        if (find) {
+            const q = String(find).toLowerCase();
+            const matches = headers.filter(h => h.toLowerCase().includes(q));
+            return JSON.stringify({ ok: true, find, found: matches.length > 0, matches, headers });
+        }
+        return JSON.stringify({ ok: true, headers });
+    }
+
     function waitForSettle(maxMs) {
         const limit = maxMs || 1500;
         return new Promise(resolve => {
             const start = Date.now();
             function check() {
-                const busy = Array.from(document.querySelectorAll('.mud-progress-linear, .mud-progress-circular'))
+                const busy = activeRequests > 0 || Array.from(document.querySelectorAll('.mud-progress-linear, .mud-progress-circular'))
                     .some(el => !isExcluded(el) && isVisible(el));
                 if (!busy && Date.now() - start >= 250) {
                     resolve();
@@ -186,7 +345,14 @@ window.crmAgentDriver = (function () {
     return {
         captureSnapshot,
         captureVisibleText,
+        setField,
+        openCombo,
+        pickOption,
+        closeCombo,
+        clickAction,
         selectTab,
+        selectGridRow,
+        readGridHeaders,
         waitForSettle
     };
 })();
