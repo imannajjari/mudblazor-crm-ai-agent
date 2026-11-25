@@ -92,7 +92,19 @@ public sealed class AgentClientService(
 
     public event Action? OnStateChanged;
 
-    public bool IsDrawerOpen { get; set; }
+    private bool _isDrawerOpen;
+    public bool IsDrawerOpen
+    {
+        get => _isDrawerOpen;
+        set
+        {
+            if (_isDrawerOpen != value)
+            {
+                _isDrawerOpen = value;
+                NotifyChanged();
+            }
+        }
+    }
     public bool IsRunning { get; private set; }
     public bool WaitingForUserAnswer { get; private set; }
     public string? PendingQuestion { get; private set; }
