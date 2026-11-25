@@ -19,6 +19,8 @@ public sealed class AgentService(
 
     private readonly Dictionary<string, IServerToolHandler> _serverToolMap =
         serverTools.ToDictionary(t => t.Name, StringComparer.Ordinal);
+    private readonly HashSet<string> _serverToolNames =
+        serverTools.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
 
     public async Task<AgentStepResponseModel> StepAsync(
         AgentStepRequestModel request,
@@ -43,12 +45,24 @@ public sealed class AgentService(
         var prior = new List<string>();
         var timings = new List<string>();
         var totalUsage = new AgentUsageModel();
-        var seenServerCalls = CollectPriorServerCalls(parsedMessages);
+        var guard = AgentServerGuard.FromTranscript(parsedMessages, _serverToolNames);
+        var isHowTo = AgentServerGuard.IsHowToQuestion(parsedMessages);
 
         for (var hop = 0; hop <= MaxServerHops; hop++)
         {
+            var isFinalCall = AgentServerGuard.ShouldForceFinalCall(working, request, options, totalUsage);
+            if (isFinalCall)
+            {
+                working.Add(new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = "[final call] Step/budget limit reached. Summarize what you have found or completed so far in plain text. Do not call any tools."
+                });
+            }
+
+            var tools = isFinalCall ? null : (isHowTo ? AgentToolSchemas.GetHowToTools() : AgentToolSchemas.GetTools());
             var sw = Stopwatch.StartNew();
-            var llmResult = await provider.CompleteAsync(working, AgentToolSchemas.GetTools(), cancellationToken);
+            var llmResult = await provider.CompleteAsync(working, tools, cancellationToken);
             sw.Stop();
             timings.Add($"llm {sw.ElapsedMilliseconds} ms");
             AgentCostCalculator.Compute(llmResult.Usage, options);
@@ -74,15 +88,15 @@ public sealed class AgentService(
                 return BuildError(prior, timings, totalUsage, options, "Assistant returned non-object JSON.");
 
             var toolCalls = assistantObj["tool_calls"]?.AsArray();
-            if (toolCalls == null || toolCalls.Count == 0)
+            if (isFinalCall || toolCalls == null || toolCalls.Count == 0)
                 return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
 
-            var hasServerTool = toolCalls.Any(tc => _serverToolMap.ContainsKey(tc?["function"]?["name"]?.GetValue<string>() ?? ""));
-            var hasUiTool = toolCalls.Any(tc => !_serverToolMap.ContainsKey(tc?["function"]?["name"]?.GetValue<string>() ?? ""));
+            var hasServerTool = toolCalls.Any(tc => _serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
+            var hasUiTool = toolCalls.Any(tc => !_serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
             if (!hasServerTool)
                 return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
 
-            var serverResults = await RunServerToolBatchAsync(toolCalls, seenServerCalls, timings, cancellationToken);
+            var serverResults = await RunServerToolBatchAsync(toolCalls, guard, timings, cancellationToken);
             if (hasUiTool || hop == MaxServerHops)
                 return BuildSuccess(llmResult.AssistantJson, prior, serverResults, timings, totalUsage, options);
 
@@ -100,20 +114,20 @@ public sealed class AgentService(
 
     private async Task<List<string>> RunServerToolBatchAsync(
         JsonArray toolCalls,
-        HashSet<string> seenCalls,
+        AgentServerGuard guard,
         List<string> timings,
         CancellationToken ct)
     {
         var results = new List<string>();
         foreach (var tc in toolCalls)
         {
-            var fnName = tc?["function"]?["name"]?.GetValue<string>() ?? "";
+            var fnName = TryGetString(tc?["function"]?["name"]) ?? "";
             if (!_serverToolMap.TryGetValue(fnName, out var handler)) continue;
 
-            var callId = tc?["id"]?.GetValue<string>() ?? Guid.NewGuid().ToString("N");
-            var argsRaw = tc?["function"]?["arguments"]?.GetValue<string>() ?? "{}";
+            var callId = TryGetString(tc?["id"]) ?? Guid.NewGuid().ToString("N");
+            var argsRaw = TryGetString(tc?["function"]?["arguments"]) ?? "{}";
             var sw = Stopwatch.StartNew();
-            var resultJson = await ExecuteServerToolAsync(handler, argsRaw, seenCalls, ct);
+            var resultJson = await ExecuteServerToolAsync(handler, argsRaw, guard, ct);
             sw.Stop();
             timings.Add($"{fnName} {sw.ElapsedMilliseconds} ms");
 
@@ -130,21 +144,9 @@ public sealed class AgentService(
     private static async Task<string> ExecuteServerToolAsync(
         IServerToolHandler handler,
         string argsRaw,
-        HashSet<string> seenCalls,
+        AgentServerGuard guard,
         CancellationToken ct)
     {
-        var signature = $"{handler.Name}:{argsRaw.Trim()}";
-        if (!seenCalls.Add(signature))
-        {
-            return JsonSerializer.Serialize(new
-            {
-                ok = false,
-                blocked = true,
-                repeatGuard = true,
-                reason = "Identical server tool call already executed in this task. Use the previous result."
-            });
-        }
-
         JsonDocument argsDoc;
         try
         {
@@ -154,8 +156,13 @@ public sealed class AgentService(
         {
             return JsonSerializer.Serialize(new { ok = false, error = "Invalid JSON tool arguments." });
         }
+
         using var _ = argsDoc;
-        return await handler.ExecuteAsync(argsDoc.RootElement, ct);
+        var blocked = guard.CheckBeforeExecute(handler.Name, argsRaw, argsDoc.RootElement);
+        if (blocked != null) return blocked;
+
+        var result = await handler.ExecuteAsync(argsDoc.RootElement, ct);
+        return guard.RecordAndCheckError(handler.Name, result);
     }
 
     public async Task<AgentLookResponseModel> LookAsync(
@@ -205,52 +212,11 @@ public sealed class AgentService(
         return new AgentLookResponseModel { Text = answerText ?? string.Empty, Usage = result.Usage };
     }
 
-    public static bool TryParseMessages(IReadOnlyList<string>? rawMessages, out List<JsonObject> parsed)
-    {
-        parsed = [];
-        if (rawMessages == null || rawMessages.Count == 0 || rawMessages.Count > MaxTranscriptMessages)
-            return false;
+    public static bool TryParseMessages(IReadOnlyList<string>? rawMessages, out List<JsonObject> parsed) =>
+        AgentTranscriptValidator.TryParseMessages(rawMessages, MaxTranscriptMessages, out parsed);
 
-        foreach (var raw in rawMessages)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) return false;
-            JsonNode? node;
-            try { node = JsonNode.Parse(raw); }
-            catch (JsonException) { return false; }
-
-            if (node is not JsonObject obj) return false;
-            var roleNode = obj["role"];
-            var role = roleNode is JsonValue rv && rv.TryGetValue<string>(out var rs) ? rs : null;
-            if (role is not ("user" or "assistant" or "tool")) return false;
-            if (role == "tool")
-            {
-                var idNode = obj["tool_call_id"];
-                var idStr = idNode is JsonValue iv && iv.TryGetValue<string>(out var ids) ? ids : null;
-                if (string.IsNullOrWhiteSpace(idStr)) return false;
-            }
-            parsed.Add(obj);
-        }
-        return true;
-    }
-
-    private HashSet<string> CollectPriorServerCalls(IReadOnlyList<JsonObject> messages)
-    {
-        var set = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var msg in messages)
-        {
-            if (msg["role"]?.GetValue<string>() != "assistant") continue;
-            var tcs = msg["tool_calls"]?.AsArray();
-            if (tcs == null) continue;
-            foreach (var tc in tcs)
-            {
-                var name = tc?["function"]?["name"]?.GetValue<string>() ?? "";
-                if (!_serverToolMap.ContainsKey(name)) continue;
-                var args = tc?["function"]?["arguments"]?.GetValue<string>() ?? "{}";
-                set.Add($"{name}:{args.Trim()}");
-            }
-        }
-        return set;
-    }
+    private static string? TryGetString(JsonNode? node) =>
+        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     private static AgentStepResponseModel BuildSuccess(string assistant, List<string> prior, List<string> serverResults, List<string> timings, AgentUsageModel usage, AgentOptions options) =>
         new() { Assistant = assistant, Prior = prior, ServerToolResults = serverResults, Timings = timings, Usage = usage, MaxTaskCostUsd = options.MaxTaskCostUsd, MaxTaskModelCalls = options.MaxTaskModelCalls };

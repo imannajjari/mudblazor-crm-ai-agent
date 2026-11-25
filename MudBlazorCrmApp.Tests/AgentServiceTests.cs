@@ -1,9 +1,11 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using MudBlazorCrmApp.Data;
 using MudBlazorCrmApp.Models;
 using MudBlazorCrmApp.Services.Agent;
+using MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 using Xunit;
 
 namespace MudBlazorCrmApp.Tests;
@@ -111,5 +113,70 @@ public class AgentServiceTests
         Assert.True(limiter.TryAcquire("u1", 2));
         Assert.False(limiter.TryAcquire("u1", 2));
         Assert.True(limiter.TryAcquire("u2", 2));
+    }
+
+    [Fact]
+    public void TryParseMessages_RejectsUnmatchedToolCallId()
+    {
+        var raw = new List<string>
+        {
+            """{"role":"user","content":"test"}""",
+            """{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"scan_screen","arguments":"{}"}}]}""",
+            """{"role":"tool","tool_call_id":"wrong_id","content":"{\"ok\":true}"}"""
+        };
+
+        Assert.False(AgentService.TryParseMessages(raw, out _));
+    }
+
+    [Fact]
+    public void AgentServerGuard_EnforcesPagingAskHelpAndDeleteRefusal()
+    {
+        var guard = new AgentServerGuard();
+        using var page1 = JsonDocument.Parse("""{"source":"customers","skip":10}""");
+        using var page2 = JsonDocument.Parse("""{"source":"customers","skip":20}""");
+        using var page3 = JsonDocument.Parse("""{"source":"customers","skip":30}""");
+
+        Assert.Null(guard.CheckBeforeExecute("read_data", page1.RootElement.GetRawText(), page1.RootElement));
+        Assert.Null(guard.CheckBeforeExecute("read_data", page2.RootElement.GetRawText(), page2.RootElement));
+        var blockedPage = guard.CheckBeforeExecute("read_data", page3.RootElement.GetRawText(), page3.RootElement);
+        Assert.NotNull(blockedPage);
+        Assert.Contains("Paging walk limit", blockedPage);
+
+        using var emptyArgs = JsonDocument.Parse("{}");
+        for (var i = 1; i <= 3; i++)
+            Assert.Null(guard.CheckBeforeExecute("ask_help", $"{{\"question\":\"q{i}\"}}", emptyArgs.RootElement));
+        var blockedHelp = guard.CheckBeforeExecute("ask_help", """{"question":"q4"}""", emptyArgs.RootElement);
+        Assert.NotNull(blockedHelp);
+        Assert.Contains("ask_help limit", blockedHelp);
+
+        var prior = new List<JsonObject>
+        {
+            JsonNode.Parse("""{"role":"tool","tool_call_id":"c1","content":"{\"ok\":false,\"deleteRefused\":true}"}""")!.AsObject()
+        };
+        var refusedGuard = AgentServerGuard.FromTranscript(prior, new HashSet<string> { "read_data" });
+        using var freshRead = JsonDocument.Parse("""{"source":"leads"}""");
+        var blockedAfterDelete = refusedGuard.CheckBeforeExecute("read_data", freshRead.RootElement.GetRawText(), freshRead.RootElement);
+        Assert.NotNull(blockedAfterDelete);
+        Assert.Contains("delete refusal", blockedAfterDelete);
+    }
+
+    [Fact]
+    public void AgentServerGuard_BlocksSameServerErrorTwice()
+    {
+        var guard = new AgentServerGuard();
+        var errJson = """{"ok":false,"error":"Source not found"}""";
+        Assert.Equal(errJson, guard.RecordAndCheckError("read_data", errJson));
+        var second = guard.RecordAndCheckError("read_data", errJson);
+        Assert.Contains("Same server error occurred twice", second);
+    }
+
+    [Fact]
+    public void SafeMarkdownFormatter_EncodesHtmlAndFormatsMarkdown()
+    {
+        var html = SafeMarkdownFormatter.ToSafeHtml("تعداد: **۱۴** <script>alert(1)</script> `code`");
+        Assert.DoesNotContain("<script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+        Assert.Contains("<strong>۱۴</strong>", html);
+        Assert.Contains("<code ", html);
     }
 }

@@ -5,8 +5,14 @@ namespace MudBlazorCrmApp.Services.Agent;
 public static class AgentToolSchemas
 {
     private static readonly JsonElement[] Phase3Tools = BuildPhase3Tools();
+    private static readonly JsonElement[] HowToTools = Phase3Tools
+        .Where(t => t.TryGetProperty("function", out var fn) &&
+                    fn.TryGetProperty("name", out var n) &&
+                    n.GetString() is "ask_help" or "get_help_page" or "finish")
+        .ToArray();
 
     public static JsonElement[] GetTools() => Phase3Tools;
+    public static JsonElement[] GetHowToTools() => HowToTools;
 
     private static JsonElement[] BuildPhase3Tools()
     {

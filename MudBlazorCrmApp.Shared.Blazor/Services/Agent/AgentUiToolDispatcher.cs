@@ -220,14 +220,20 @@ public sealed class AgentUiToolDispatcher(
         if (key.StartsWith('/') && BlockedRoutes.Contains(NormalizeRoutePath(key)))
             return (null, available);
 
+        var keyStem = key.TrimStart('/').TrimEnd('s', 'S');
         var match = available.FirstOrDefault(r =>
                 string.Equals(r.Text, key, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(r.Href.TrimStart('/'), key.TrimStart('/'), StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(keyStem) && string.Equals(r.Href.TrimStart('/').TrimEnd('s', 'S'), keyStem, StringComparison.OrdinalIgnoreCase)) ||
                 string.Equals(NormalizeRoutePath(r.Href), NormalizeRoutePath(key), StringComparison.OrdinalIgnoreCase))
             ?? available.FirstOrDefault(r =>
-                r.Text.Contains(key, StringComparison.OrdinalIgnoreCase) ||
-                key.Contains(r.Text, StringComparison.OrdinalIgnoreCase) ||
-                r.Href.TrimStart('/').Contains(key.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
+            {
+                var hrefNoSlash = r.Href.TrimStart('/');
+                var hrefStem = hrefNoSlash.TrimEnd('s', 'S');
+                return (!string.IsNullOrEmpty(r.Text) && (r.Text.Contains(key, StringComparison.OrdinalIgnoreCase) || key.Contains(r.Text, StringComparison.OrdinalIgnoreCase))) ||
+                       (!string.IsNullOrEmpty(keyStem) && hrefNoSlash.Contains(keyStem, StringComparison.OrdinalIgnoreCase)) ||
+                       (!string.IsNullOrEmpty(hrefStem) && keyStem.Contains(hrefStem, StringComparison.OrdinalIgnoreCase));
+            });
 
         if (match == null || BlockedRoutes.Contains(NormalizeRoutePath(match.Href)))
             return (null, available);

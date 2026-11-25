@@ -1,6 +1,8 @@
 @page "/logout"
+@using MudBlazorCrmApp.Shared.Blazor.Services
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager Navigation
+@inject AgentClientService Agent
 
 <PageTitle>Logout</PageTitle>
 
@@ -13,6 +15,7 @@
 @code {
     protected override async Task OnInitializedAsync()
     {
+        await Agent.ClearOnLogoutAsync();
         await ((IdentityAuthenticationStateProvider)AuthenticationStateProvider).LogoutAsync();
 
         Navigation.NavigateTo("");

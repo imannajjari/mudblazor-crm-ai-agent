@@ -52,8 +52,9 @@ public sealed class AgentPermissionGate
         var needsPrompt = effectiveRisk switch
         {
             "destructive" => true, // Never auto-approve destructive actions without explicit user confirmation
-            "save" => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey),
-            _ => false
+            "read" => false,
+            "save" or "write" => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey),
+            _ => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey) // Fail closed for unknown risk classifications
         };
 
         if (!needsPrompt)

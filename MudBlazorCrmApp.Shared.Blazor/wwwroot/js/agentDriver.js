@@ -37,13 +37,19 @@ window.crmAgentDriver = (function () {
 
     function classifyRisk(label) {
         const t = cleanText(label).toLowerCase();
-        if (/\b(delete|remove|void)\b/.test(t) || t.includes('حذف')) return 'destructive';
+        if (/\b(delete|remove|void)\b/.test(t) || t.includes('حذف')) {
+            return 'destructive';
+        }
         if (/\b(yes|confirm)\b/.test(t) || t === 'بله') return 'confirm';
         if (/\b(save|submit|add|create|update|ok)\b/.test(t) ||
-            ['ذخیره', 'ثبت', 'افزودن', 'ویرایش', 'تایید'].some(k => t.includes(k))) {
+            ['ذخیره', 'ثبت', 'افزودن', 'تایید'].some(k => t.includes(k))) {
             return 'save';
         }
-        return 'read';
+        if (/\b(cancel|close|back|refresh|reload|search|filter|view|details|next|prev|previous)\b/.test(t) ||
+            ['انصراف', 'بستن', 'بازگشت', 'جستجو', 'فیلتر', 'تازه‌سازی', 'بعدی', 'قبلی'].some(k => t.includes(k))) {
+            return 'read';
+        }
+        return 'write';
     }
 
     function captureSnapshot() {
@@ -341,12 +347,12 @@ window.crmAgentDriver = (function () {
 
     function getNavRoutes() {
         const blocked = new Set(['/logout', '/account/changepassword', '/login', '/register', '/user']);
-        const links = Array.from(document.querySelectorAll('.mud-nav-menu a.mud-nav-link'));
+        const links = Array.from(document.querySelectorAll('.mud-navmenu a.mud-nav-link, a.mud-nav-link'));
         const seen = new Set();
         const routes = [];
         links.forEach(a => {
             const href = a.getAttribute('href');
-            const text = cleanText(a.innerText);
+            const text = cleanText(a.textContent || a.innerText);
             if (!href || href.startsWith('http') || href === '#') return;
             const normHref = href.startsWith('/') ? href : '/' + href;
             if (blocked.has(normHref.toLowerCase())) return;

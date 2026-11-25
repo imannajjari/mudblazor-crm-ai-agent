@@ -4,6 +4,8 @@ public class AgentStepRequestModel
 {
     public List<string> Messages { get; set; } = [];
     public string? ChatKey { get; set; }
+    public int ModelCallsSoFar { get; set; }
+    public decimal CostSoFarUsd { get; set; }
 }
 
 public class AgentStepResponseModel

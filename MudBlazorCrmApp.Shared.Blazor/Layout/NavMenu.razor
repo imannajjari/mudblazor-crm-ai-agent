@@ -13,12 +13,14 @@
     <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())" />
     <MudText>@L["APP_TITLE"]</MudText>
     <MudSpacer />
-    <MudTooltip Arrow="true" Placement="Placement.Bottom" Text="@L["AGENT_BUTTON_TOOLTIP"]">
+    @if (_agentEnabled)
+    {
         <MudIconButton Icon="@Icons.Material.Filled.SmartToy"
                        Color="Color.Inherit"
+                       title="@L["AGENT_BUTTON_TOOLTIP"]"
                        OnClick="@(() => { Agent.IsDrawerOpen = !Agent.IsDrawerOpen; })"
-                       data-testid="agent-toggle-btn" />
-    </MudTooltip>
+                       data-testid="agent-open-button" />
+    }
     <AuthorizeView>
         <MudAutocomplete T="SearchResultItem" SearchFunc="@SearchEntities" Placeholder="@L["HEADER_SEARCH_PLACEHOLDER"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Dense="true" Class="mr-4" Style="max-width:300px;color:inherit;" ToStringFunc="@(item => item?.Name ?? "")" ValueChanged="@OnSearchItemSelected" ResetValueOnEmptyText="true" />
     </AuthorizeView>
@@ -35,7 +37,7 @@
                     {
                         <MudButton Size="Size.Small" OnClick="MarkAllRead">@L["HEADER_MARK_ALL_READ"]</MudButton>
                     }
-                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="RefreshNotifications" Title="Check for alerts" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="RefreshNotifications" title="Check for alerts" />
                 </MudStack>
                 <MudDivider Class="mb-2" />
                 @if (_notifications == null || _notifications.Count == 0)
@@ -161,6 +163,7 @@
     private bool drawerOpen = false;
 
     private bool _themingDrawerOpen;
+    private bool _agentEnabled;
 
     // Notification state
     private bool _notificationsOpen;
@@ -216,6 +219,7 @@
             };
 
         await ThemeManagerChanged(_themeManager);
+        _agentEnabled = await Agent.IsEnabledAsync();
         await LoadNotificationCount();
     }
                             
