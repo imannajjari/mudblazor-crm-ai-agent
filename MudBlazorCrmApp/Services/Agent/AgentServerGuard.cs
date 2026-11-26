@@ -217,9 +217,7 @@ public sealed class AgentServerGuard
 
     private void InspectPriorToolResult(string content)
     {
-        if (content.Contains("\"deleteRefused\":true", StringComparison.OrdinalIgnoreCase) ||
-            (content.Contains("\"blocked\":true", StringComparison.OrdinalIgnoreCase) &&
-             content.Contains("delete", StringComparison.OrdinalIgnoreCase)))
+        if (content.Contains("\"deleteRefused\":true", StringComparison.OrdinalIgnoreCase))
         {
             _deleteRefused = true;
         }

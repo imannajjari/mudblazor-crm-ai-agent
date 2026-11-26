@@ -37,6 +37,12 @@ public static class Extensions
         services.AddScoped<IUiToolHandler, ClearFiltersHandler>();
         services.AddScoped<IUiToolHandler, SortGridHandler>();
         services.AddScoped<IUiToolHandler, RightClickHandler>();
+        services.AddScoped<IUiToolHandler, ScanMenusHandler>();
+        services.AddScoped<IUiToolHandler, ScanContextMenuHandler>();
+        services.AddScoped<IUiToolHandler, ScanTabsHandler>();
+        services.AddScoped<IUiToolHandler, ScrollGridHandler>();
+        services.AddScoped<IUiToolHandler, SelectTreeNodeHandler>();
+        services.AddScoped<IUiToolHandler, SearchSettingsHandler>();
         services.AddScoped<IBusinessAction, OpenPipelineSummaryAction>();
         services.AddScoped<IBusinessAction, OpenOverdueTasksAction>();
         services.AddScoped<BusinessToolRegistry>();

@@ -716,6 +716,24 @@ html, body {
     align-items: center;
 }
 
+.agent-panel--dragover {
+    outline: 2px dashed var(--mud-palette-primary);
+    outline-offset: -4px;
+}
+
+.agent-help-note {
+    border: 1px dashed var(--mud-palette-lines-default);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    background: var(--mud-palette-background-grey);
+}
+
+.agent-help-note summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
 .agent-working__dots i {
     width: 5px;
     height: 5px;

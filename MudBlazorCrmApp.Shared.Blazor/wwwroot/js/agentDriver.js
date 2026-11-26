@@ -73,8 +73,9 @@ window.crmAgentDriver = (function () {
             || document.body;
     }
 
-    function captureSnapshot() {
+    function captureSnapshot(maxRowsParam) {
         elementMap.clear();
+        const maxRows = Math.min(50, Math.max(1, Number(maxRowsParam) || 15));
         const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
         const topDialog = dialogs.length > 0 ? dialogs[dialogs.length - 1] : null;
         const root = topDialog || document.querySelector('.mud-main-content') || document.body;
@@ -175,7 +176,6 @@ window.crmAgentDriver = (function () {
                 .filter(Boolean);
 
             const allRows = Array.from(table.querySelectorAll('tbody tr'));
-            const maxRows = 15;
             const rows = allRows.slice(0, maxRows).map((tr, rIdx) => {
                 const rowId = 'r' + gridIdx + '_' + (rIdx + 1);
                 elementMap.set(rowId, tr);
@@ -397,40 +397,56 @@ window.crmAgentDriver = (function () {
         return JSON.stringify({ ok: true, id, lookupOptions: options });
     }
 
-    async function pickOption(optionTextOrIndex) {
+    async function pickOption(optionTextOrIndex, multiSelect, extraOptions) {
         const popovers = Array.from(document.querySelectorAll('.mud-popover-open')).filter(isVisible);
-        const items = [];
-        popovers.forEach(p => {
-            p.querySelectorAll('.mud-list-item').forEach(item => {
-                if (isVisible(item)) items.push(item);
+        const getVisibleItems = () => {
+            const list = [];
+            popovers.forEach(p => {
+                p.querySelectorAll('.mud-list-item').forEach(item => {
+                    if (isVisible(item)) list.push(item);
+                });
             });
-        });
+            return list;
+        };
 
+        const items = getVisibleItems();
         if (items.length === 0) {
             return JSON.stringify({ ok: false, error: 'No open combo options found. Call open_combo first.' });
         }
 
-        const q = cleanText(String(optionTextOrIndex)).toLowerCase();
-        if (!q) {
+        const targets = Array.isArray(extraOptions) && extraOptions.length > 0
+            ? extraOptions
+            : [optionTextOrIndex];
+        const picked = [];
+
+        for (const rawTarget of targets) {
+            const currentItems = getVisibleItems();
+            const q = cleanText(String(rawTarget ?? '')).toLowerCase();
+            if (!q) continue;
+            let match = currentItems.find(i => cleanText(i.innerText).toLowerCase() === q);
+            if (!match && (typeof rawTarget === 'number' || /^\d+$/.test(String(rawTarget)))) {
+                const idx = Number(rawTarget) - 1;
+                if (idx >= 0 && idx < currentItems.length) match = currentItems[idx];
+            }
+            if (!match) match = currentItems.find(i => cleanText(i.innerText).toLowerCase().includes(q));
+            if (!match) {
+                return JSON.stringify({ ok: false, error: 'Option not found: ' + rawTarget, picked });
+            }
+            picked.push(cleanText(match.innerText));
+            match.click();
+            await waitForSettle(350);
+        }
+
+        if (picked.length === 0) {
             return JSON.stringify({ ok: false, error: 'Option text or index is required.' });
         }
-        let match = items.find(i => cleanText(i.innerText).toLowerCase() === q);
-        if (!match && (typeof optionTextOrIndex === 'number' || /^\d+$/.test(String(optionTextOrIndex)))) {
-            const idx = Number(optionTextOrIndex) - 1;
-            if (idx >= 0 && idx < items.length) match = items[idx];
+        if (multiSelect) {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await waitForSettle(300);
+        } else {
+            await waitForSettle(150);
         }
-        if (!match) {
-            match = items.find(i => cleanText(i.innerText).toLowerCase().includes(q));
-        }
-
-        if (!match) {
-            return JSON.stringify({ ok: false, error: 'Option not found: ' + optionTextOrIndex });
-        }
-
-        const chosenText = cleanText(match.innerText);
-        match.click();
-        await waitForSettle(500);
-        return JSON.stringify({ ok: true, picked: chosenText });
+        return JSON.stringify({ ok: true, picked: picked.length === 1 ? picked[0] : picked });
     }
 
     async function closeCombo() {
@@ -648,11 +664,14 @@ window.crmAgentDriver = (function () {
         });
     }
 
+    let lastSavedFilters = [];
+
     async function clearFilters() {
         const root = getActiveRoot();
         const inputs = Array.from(root.querySelectorAll('.mud-table-toolbar input, .mud-table-filter input, thead input'))
             .filter(el => isVisible(el) && !el.disabled && !el.readOnly && (el.value || '').length > 0);
         const saved = inputs.map(el => ({ el, value: el.value }));
+        if (saved.length > 0) lastSavedFilters = saved;
         let cleared = 0;
         let succeeded = false;
         try {
@@ -662,7 +681,7 @@ window.crmAgentDriver = (function () {
             }
             if (cleared > 0) await waitForSettle(600);
             succeeded = true;
-            return JSON.stringify({ ok: true, cleared });
+            return JSON.stringify({ ok: true, cleared, canRestore: saved.length > 0 });
         } catch (err) {
             return JSON.stringify({ ok: false, error: err?.message || 'Failed to clear filters.' });
         } finally {
@@ -672,6 +691,205 @@ window.crmAgentDriver = (function () {
                 }
             }
         }
+    }
+
+    async function restoreFilters() {
+        let restored = 0;
+        for (const { el, value } of lastSavedFilters) {
+            if (document.contains(el) && !el.disabled) {
+                setNativeInputValue(el, value);
+                restored++;
+            }
+        }
+        if (restored > 0) await waitForSettle(600);
+        return JSON.stringify({ ok: true, restored });
+    }
+
+    function scanMenus() {
+        const routes = getNavRouteList();
+        const groups = Array.from(document.querySelectorAll('.mud-nav-group button.mud-nav-link, .mud-nav-group-header'))
+            .map(el => cleanText(el.innerText))
+            .filter(Boolean);
+        return JSON.stringify({ ok: true, routes, groups, openMenuItems: getOpenComboOptions() });
+    }
+
+    function scanContextMenu() {
+        const items = getOpenComboOptions();
+        return JSON.stringify({ ok: items.length > 0, items });
+    }
+
+    function scanTabs() {
+        const root = getActiveRoot();
+        const tabs = [];
+        let idx = 1;
+        root.querySelectorAll('.mud-tab').forEach(el => {
+            if (!isVisible(el)) return;
+            const id = 't' + (idx++);
+            elementMap.set(id, el);
+            tabs.push({
+                id,
+                title: cleanText(el.innerText),
+                active: el.classList.contains('mud-tab-active'),
+                hasError: !!el.querySelector('.mud-error-text'),
+                disabled: el.classList.contains('mud-disabled')
+            });
+        });
+        return JSON.stringify({ ok: true, tabs });
+    }
+
+    async function scrollGrid(direction) {
+        const root = getActiveRoot();
+        const container = Array.from(root.querySelectorAll('.mud-table-container')).find(isVisible)
+            || Array.from(root.querySelectorAll('.mud-table-root')).find(isVisible)?.parentElement;
+        if (!container) return JSON.stringify({ ok: false, error: 'No visible grid container found.' });
+
+        const step = Math.max(200, container.clientHeight * 0.8);
+        if (direction === 'top') container.scrollTop = 0;
+        else if (direction === 'bottom') container.scrollTop = container.scrollHeight;
+        else if (direction === 'up') container.scrollTop = Math.max(0, container.scrollTop - step);
+        else container.scrollTop = Math.min(container.scrollHeight, container.scrollTop + step);
+
+        await waitForSettle(250);
+        return JSON.stringify({ ok: true, direction, scrollTop: container.scrollTop, scrollHeight: container.scrollHeight });
+    }
+
+    async function selectTreeNode(label) {
+        const q = cleanText(String(label || '')).toLowerCase();
+        if (!q) return JSON.stringify({ ok: false, error: 'Tree node label is required.' });
+        const root = getActiveRoot();
+        const contents = Array.from(root.querySelectorAll('.mud-treeview-item-content')).filter(isVisible);
+        const nodes = contents.length > 0 ? contents : Array.from(root.querySelectorAll('.mud-treeview-item')).filter(isVisible);
+        const match = nodes.find(n => cleanText(n.innerText).toLowerCase() === q)
+            || nodes.find(n => cleanText(n.innerText).toLowerCase().includes(q));
+        if (!match) return JSON.stringify({ ok: false, error: 'Tree node not found: ' + label });
+        spotlightElement(match);
+        match.click();
+        await waitForSettle(400);
+        return JSON.stringify({ ok: true, selected: cleanText(match.innerText) });
+    }
+
+    function searchSettings(query) {
+        const q = cleanText(String(query || '')).toLowerCase();
+        if (!q) return JSON.stringify({ ok: false, error: 'Search query is required.' });
+        const root = getActiveRoot();
+        const routes = getNavRouteList().filter(r =>
+            r.text.toLowerCase().includes(q) || r.href.toLowerCase().includes(q));
+        const tabs = Array.from(root.querySelectorAll('.mud-tab')).filter(isVisible)
+            .map(t => cleanText(t.innerText)).filter(t => t.toLowerCase().includes(q));
+        const labels = Array.from(root.querySelectorAll('.mud-input-label, button, a.mud-button-root')).filter(isVisible)
+            .map(el => cleanText(el.innerText || el.getAttribute('aria-label') || ''))
+            .filter(t => t && t.toLowerCase().includes(q));
+        return JSON.stringify({ ok: true, query, routes: routes.slice(0, 15), tabs, elements: [...new Set(labels)].slice(0, 20) });
+    }
+
+    function capturePicture() {
+        try {
+            const root = getActiveRoot();
+            const rect = root.getBoundingClientRect();
+            const w = Math.min(1024, Math.max(200, Math.round(rect.width)));
+            const h = Math.min(768, Math.max(200, Math.round(rect.height)));
+            const clone = root.cloneNode(true);
+            clone.querySelectorAll('[data-agent-panel="true"], script, style, input[type="password"]').forEach(el => el.remove());
+            clone.querySelectorAll('.mud-input-control').forEach(ctrl => {
+                const lbl = cleanText(ctrl.querySelector('label')?.innerText || '');
+                if (/password|secret|token|apikey|رمز\s*عبور|کلمه\s*عبور/i.test(lbl)) {
+                    ctrl.querySelectorAll('input, textarea').forEach(inp => inp.remove());
+                }
+            });
+            const serialized = new XMLSerializer().serializeToString(clone);
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+            const img = new Image();
+            return new Promise(resolve => {
+                const timer = setTimeout(() => resolve(''), 1200);
+                img.onload = () => {
+                    clearTimeout(timer);
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, w, h);
+                        ctx.drawImage(img, 0, 0);
+                        const dataUrl = canvas.toDataURL('image/png');
+                        resolve(dataUrl.replace(/^data:image\/png;base64,/, ''));
+                    } catch {
+                        resolve('');
+                    }
+                };
+                img.onerror = () => { clearTimeout(timer); resolve(''); };
+                img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+            });
+        } catch {
+            return Promise.resolve('');
+        }
+    }
+
+    async function copyText(text) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(String(text || ''));
+                return true;
+            }
+        } catch { /* fallback below */ }
+        const ta = document.createElement('textarea');
+        ta.value = String(text || '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch { ok = false; }
+        ta.remove();
+        return ok;
+    }
+
+    function savePanelState(key, value) {
+        try { localStorage.setItem(String(key), String(value)); } catch { /* storage quota/disabled */ }
+    }
+
+    function loadPanelState(key) {
+        try { return localStorage.getItem(String(key)) || ''; } catch { return ''; }
+    }
+
+    function clearPanelState(key) {
+        try { localStorage.removeItem(String(key)); } catch { /* ignore */ }
+    }
+
+    function bindFileDrop(dotNetRef) {
+        const panel = document.querySelector('[data-testid="agent-panel"]');
+        if (!panel || panel.dataset.dropBound === '1') return;
+        panel.dataset.dropBound = '1';
+        panel.addEventListener('dragover', (e) => {
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+                e.preventDefault();
+                panel.classList.add('agent-panel--dragover');
+            }
+        });
+        panel.addEventListener('dragleave', () => panel.classList.remove('agent-panel--dragover'));
+        panel.addEventListener('drop', async (e) => {
+            panel.classList.remove('agent-panel--dragover');
+            if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+            e.preventDefault();
+            const files = Array.from(e.dataTransfer.files).slice(0, 5);
+            for (const f of files) {
+                if (f.size === 0 || f.size > 10 * 1024 * 1024) {
+                    await dotNetRef.invokeMethodAsync('OnFileDropError', f.name, f.size).catch(() => {});
+                    continue;
+                }
+                try {
+                    const buf = await f.arrayBuffer();
+                    const bytes = new Uint8Array(buf);
+                    const chunks = [];
+                    for (let i = 0; i < bytes.length; i += 8192) {
+                        chunks.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
+                    }
+                    await dotNetRef.invokeMethodAsync('OnFileDropped', f.name, btoa(chunks.join('')));
+                } catch {
+                    await dotNetRef.invokeMethodAsync('OnFileDropError', f.name, f.size).catch(() => {});
+                }
+            }
+        });
     }
 
     function setNativeInputValue(input, strVal) {
@@ -798,6 +1016,7 @@ window.crmAgentDriver = (function () {
     return {
         captureSnapshot,
         captureVisibleText,
+        capturePicture,
         setField,
         openCombo,
         pickOption,
@@ -807,13 +1026,25 @@ window.crmAgentDriver = (function () {
         selectGridRow,
         readGridHeaders,
         clearFilters,
+        restoreFilters,
         sortGrid,
         rightClick,
+        scanMenus,
+        scanContextMenu,
+        scanTabs,
+        scrollGrid,
+        selectTreeNode,
+        searchSettings,
         uploadFileToInput,
         startVoiceInput,
         stopVoiceInput,
         getNavRoutes,
         waitForSettle,
-        enablePanelDrag
+        enablePanelDrag,
+        copyText,
+        savePanelState,
+        loadPanelState,
+        clearPanelState,
+        bindFileDrop
     };
 })();

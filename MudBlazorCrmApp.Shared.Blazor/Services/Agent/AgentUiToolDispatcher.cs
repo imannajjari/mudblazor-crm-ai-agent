@@ -39,14 +39,27 @@ public sealed class AgentUiToolDispatcher(
         handlers.ToDictionary(h => h.ToolName, StringComparer.Ordinal);
     private readonly AgentSafetyState _safety = new();
 
-    public void ResetSafety() => _safety.Reset();
+    public void ResetSafety(bool isDeleteGoal = false, bool hasAttachments = false, bool adviceOnlyGoal = false)
+    {
+        _safety.Reset();
+        _safety.DeleteTaskRequested = isDeleteGoal;
+        _safety.HasAttachmentsInTask = hasAttachments;
+        _adviceOnlyGoal = adviceOnlyGoal;
+    }
+
+    private bool _adviceOnlyGoal;
+    public bool IsVisionEnabled { get; set; } = true;
+    public void ResetSafety() => ResetSafety(false, false, false);
+    public void MarkRecordRead() => _safety.MarkRead();
     public string? CheckFinishAllowed() => _safety.CheckFinishOrNavAllowed();
 
-    public async Task<string> CaptureSnapshotAsync(CancellationToken ct = default)
+    public Task<string> CaptureSnapshotAsync(CancellationToken ct = default) => CaptureSnapshotAsync(15, ct);
+
+    public async Task<string> CaptureSnapshotAsync(int maxRows, CancellationToken ct = default)
     {
         try
         {
-            return await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureSnapshot", ct);
+            return await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureSnapshot", ct, maxRows);
         }
         catch (Exception ex)
         {
@@ -62,7 +75,7 @@ public sealed class AgentUiToolDispatcher(
         AgentMode mode,
         List<string> ledger,
         Func<string, string, CancellationToken, Task<PermissionDecision>> askPermissionAsync,
-        Func<string, CancellationToken, Task<string>> askUserAsync,
+        Func<string, string[]?, CancellationToken, Task<string>> askUserAsync,
         Func<int, int, int, int, decimal?, Task> onLookUsageAsync,
         CancellationToken ct)
     {
@@ -94,6 +107,12 @@ public sealed class AgentUiToolDispatcher(
         }
     }
 
+    public async Task ClearPanelStateAsync(CancellationToken ct = default)
+    {
+        try { await jsRuntime.InvokeVoidAsync("crmAgentDriver.clearPanelState", ct, "crm_agent_panel_state"); }
+        catch (Exception ex) { logger.LogDebug(ex, "clearPanelState failed."); }
+    }
+
     public Task<string> InvokeDriverStringAsync(string fn, CancellationToken ct, params object?[] args) =>
         jsRuntime.InvokeAsync<string>($"crmAgentDriver.{fn}", ct, args).AsTask();
 
@@ -117,7 +136,7 @@ public sealed class AgentUiToolDispatcher(
     public Task<(bool Allowed, string? BlockReason)> AuthorizeAsync(
         AgentMode mode, string route, bool inDialog, string actionText, string risk, string targetName,
         string snapshotJson, Func<string, string, CancellationToken, Task<PermissionDecision>> askPermissionAsync, CancellationToken ct) =>
-        permissionGate.AuthorizeAsync(mode, route, inDialog, actionText, risk, targetName, snapshotJson, askPermissionAsync, ct);
+        permissionGate.AuthorizeAsync(mode, route, inDialog, actionText, risk, targetName, snapshotJson, askPermissionAsync, ct, _adviceOnlyGoal);
 
     public static string NormalizeRoutePath(string href)
     {
@@ -168,9 +187,15 @@ public sealed class AgentUiToolDispatcher(
         }
     }
 
-    public async Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct)
+    public async Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct) =>
+        await PostLookAsync(text, question, null, null, ct);
+
+    public async Task<LookResponseDto?> PostLookAsync(string text, string question, string? image, string? mediaType, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, LookEndpoint) { Content = JsonContent.Create(new { text, question }) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, LookEndpoint)
+        {
+            Content = JsonContent.Create(new { text, question, image, mediaType })
+        };
         var token = await tokenProvider.GetTokenAsync();
         if (!string.IsNullOrWhiteSpace(token)) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var res = await httpClient.SendAsync(req, ct);

@@ -6,9 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
-internal readonly record struct AgentToolCall(string Id, string Name, string ArgsJson);
+public readonly record struct AgentToolCall(string Id, string Name, string ArgsJson);
 
-internal static partial class AgentClientTranscriptHelper
+public static partial class AgentClientTranscriptHelper
 {
     [GeneratedRegex(@"<attachment\b[^>]*>[\s\S]*?</attachment>", RegexOptions.IgnoreCase)]
     private static partial Regex AttachmentBlockRegex();
@@ -90,7 +90,18 @@ internal static partial class AgentClientTranscriptHelper
     public static string SerializeToolResult(string callId, string resultJson) =>
         JsonSerializer.Serialize(new { role = "tool", tool_call_id = callId, content = resultJson });
 
-    public static string AppendLedger(string summary, List<string> ledger) => summary;
+    public static string AppendLedger(string summary, List<string> ledger, string? heading = null)
+    {
+        if (ledger.Count == 0) return summary;
+        var items = ledger.Where(l => !string.IsNullOrWhiteSpace(l)).Distinct(StringComparer.Ordinal).ToList();
+        if (items.Count == 0) return summary;
+        var title = string.IsNullOrWhiteSpace(heading) ? "Actions performed in application:" : heading;
+        if (summary.Contains(title, StringComparison.Ordinal)) return summary;
+        var bullets = string.Join("\n", items.Select(i => $"- {i}"));
+        return string.IsNullOrWhiteSpace(summary)
+            ? $"**{title}**\n{bullets}"
+            : $"{summary.TrimEnd()}\n\n---\n**{title}**\n{bullets}";
+    }
 
     public static List<AgentClientService.AgentChatEntry> DeserializeHistory(
         string? historyJson,

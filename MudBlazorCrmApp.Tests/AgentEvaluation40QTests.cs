@@ -134,7 +134,7 @@ public class AgentEvaluation40QTests
             """{"url":"/Customer","inDialog":false,"actions":[{"id":"a_del","text":"Delete","risk":"destructive"}]}""",
             AgentMode.Manual, [], new AgentSafetyState(),
             (_, _, _) => Task.FromResult(PermissionDecision.Deny),
-            (_, _) => Task.FromResult(""),
+            (_, _, _) => Task.FromResult(""),
             (_, _, _, _, _) => Task.CompletedTask,
             host);
     }

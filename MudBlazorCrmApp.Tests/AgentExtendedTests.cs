@@ -232,7 +232,7 @@ public class AgentExtendedTests
         var ctx = new UiToolContext(
             "{}", AgentMode.Manual, [], new AgentSafetyState(),
             (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce),
-            (_, _) => Task.FromResult(""),
+            (_, _, _) => Task.FromResult(""),
             (_, _, _, _, _) => Task.CompletedTask,
             host);
 
@@ -302,7 +302,7 @@ public class AgentExtendedTests
         var registry = new BusinessToolRegistry([new OpenPipelineSummaryAction(), new OpenOverdueTasksAction()]);
         Assert.Equal(2, registry.List().Count);
         var host = new RecordingUiHost();
-        var ctx = new UiToolContext("{}", AgentMode.Manual, [], new AgentSafetyState(), (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce), (_, _) => Task.FromResult(""), (_, _, _, _, _) => Task.CompletedTask, host);
+        var ctx = new UiToolContext("{}", AgentMode.Manual, [], new AgentSafetyState(), (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce), (_, _, _) => Task.FromResult(""), (_, _, _, _, _) => Task.CompletedTask, host);
         var res = await new RunBusinessActionHandler(registry).ExecuteAsync(JsonDocument.Parse("""{"action":"open_pipeline_summary"}""").RootElement, ctx, CancellationToken.None);
         Assert.Contains("/pipeline", res.ResultJson);
     }
@@ -384,7 +384,7 @@ public class AgentExtendedTests
         var registry = new BusinessToolRegistry([new OpenPipelineSummaryAction()]);
         var dirtySafety = new AgentSafetyState();
         dirtySafety.MarkDirty();
-        var dirtyCtx = new UiToolContext("{}", AgentMode.Manual, [], dirtySafety, (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce), (_, _) => Task.FromResult(""), (_, _, _, _, _) => Task.CompletedTask, host);
+        var dirtyCtx = new UiToolContext("{}", AgentMode.Manual, [], dirtySafety, (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce), (_, _, _) => Task.FromResult(""), (_, _, _, _, _) => Task.CompletedTask, host);
         var bizBlocked = await new RunBusinessActionHandler(registry).ExecuteAsync(JsonDocument.Parse("""{"action":"open_pipeline_summary"}""").RootElement, dirtyCtx, CancellationToken.None);
         Assert.Contains("\"blocked\":true", bizBlocked.ResultJson);
 
@@ -401,6 +401,112 @@ public class AgentExtendedTests
             new() { ["role"] = "user", ["content"] = "[finish blocked] Unsaved edits" }
         };
         Assert.True(AgentServerGuard.IsHowToQuestion(step2Msgs));
+    }
+
+    [Fact]
+    public async Task Wave2LoopResilienceSafetyGuardsAndHandlers_EnforceContracts()
+    {
+        // 1. AppendLedger formats deduplicated actions block
+        var summary = AgentClientTranscriptHelper.AppendLedger("Done.", ["مقداردهی فیلد|Name: «Acme»", "مقداردهی فیلد|Name: «Acme»", "کلیک دکمه|Save [save]"], "Actions:");
+        Assert.Contains("Actions:", summary);
+        Assert.Equal(2, summary.Split("- ").Length - 1);
+
+        // 2. Client loop detection + predictive final call + delete/advice intent
+        Assert.NotNull(AgentLoopGuards.DetectLoop(["scan_screen:{}", "scan_screen:{}", "scan_screen:{}"]));
+        Assert.NotNull(AgentLoopGuards.DetectLoop(["a:1", "b:2", "a:1", "b:2"]));
+        Assert.Null(AgentLoopGuards.DetectLoop(["a:1", "b:2", "c:3"]));
+        Assert.True(AgentLoopGuards.ShouldInjectPredictiveFinalCall(23, 25, 1, 40, 0m, 0.80m));
+        Assert.True(AgentLoopGuards.ShouldInjectPredictiveFinalCall(0, 25, 39, 40, 0m, 0.80m));
+        Assert.True(AgentLoopGuards.ShouldInjectPredictiveFinalCall(0, 25, 1, 40, 0.72m, 0.80m));
+        Assert.True(AgentLoopGuards.IsDeleteTaskGoal("مشتری Acme را حذف کن"));
+        Assert.True(AgentLoopGuards.IsReadOnlyAdviceGoal("چطور یک مشتری جدید ثبت کنم؟"));
+        Assert.False(AgentLoopGuards.IsReadOnlyAdviceGoal("یک مشتری جدید با نام تست بساز"));
+
+        // 3. AutoModeAdviceGuard prevents Auto bypass on read-only advice goals
+        var gate = new AgentPermissionGate();
+        var prompted = false;
+        var (okAdvice, _) = await gate.AuthorizeAsync(AgentMode.Auto, "/Customer", false, "Save", "save", "Save", "{}", (_, _, _) => { prompted = true; return Task.FromResult(PermissionDecision.AllowOnce); }, CancellationToken.None, adviceOnlyGoal: true);
+        Assert.True(okAdvice);
+        Assert.True(prompted);
+
+        // 4. Delete prerequisite, wrongRecordBlock, fileValueBlock, readBackMismatch, replacedDeleteGuard, and new UI handlers
+        var host = new RecordingUiHost();
+        var safety = new AgentSafetyState { DeleteTaskRequested = true, HasAttachmentsInTask = true };
+        var ctx = new UiToolContext("""{"url":"/Customer","inDialog":true,"title":"Edit Beta","dialogText":"Edit Beta Corp","fields":[{"id":"f1","label":"Name","kind":"text"}],"actions":[{"id":"a1","text":"Delete","risk":"destructive"},{"id":"a2","text":"Save","risk":"save"}]}""", AgentMode.Auto, [], safety, (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce), (_, _, _) => Task.FromResult("ok"), (_, _, _, _, _) => Task.CompletedTask, host);
+
+        // fileValueBlock
+        var fileValRes = await new SetFieldHandler().ExecuteAsync(JsonDocument.Parse("""{"id":"f1","value":"C:\\fakepath\\data.csv"}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("\"blocked\":true", fileValRes.ResultJson);
+
+        // Delete without prior read is blocked
+        var delNoRead = await new ClickActionHandler().ExecuteAsync(JsonDocument.Parse("""{"id":"a1","targetName":"Beta"}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("\"blocked\":true", delNoRead.ResultJson);
+
+        // After mark read + refused delete -> replacedDeleteGuard blocks save
+        safety.MarkRead();
+        safety.MarkDeleteRefused();
+        var repDel = await new ClickActionHandler().ExecuteAsync(JsonDocument.Parse("""{"id":"a2","targetName":"Beta"}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("\"blocked\":true", repDel.ResultJson);
+
+        // New Wave 2 handlers invoke expected driver methods
+        await new ScanMenusHandler().ExecuteAsync(JsonDocument.Parse("{}").RootElement, ctx, CancellationToken.None);
+        await new ScanContextMenuHandler().ExecuteAsync(JsonDocument.Parse("{}").RootElement, ctx, CancellationToken.None);
+        await new ScanTabsHandler().ExecuteAsync(JsonDocument.Parse("{}").RootElement, ctx, CancellationToken.None);
+        await new ScrollGridHandler().ExecuteAsync(JsonDocument.Parse("""{"direction":"down"}""").RootElement, ctx, CancellationToken.None);
+        await new SelectTreeNodeHandler().ExecuteAsync(JsonDocument.Parse("""{"label":"Settings"}""").RootElement, ctx, CancellationToken.None);
+        await new SearchSettingsHandler().ExecuteAsync(JsonDocument.Parse("""{"query":"Customer"}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("scanMenus", host.Calls);
+        Assert.Contains("scanContextMenu", host.Calls);
+        Assert.Contains("scanTabs", host.Calls);
+        Assert.Contains("scrollGrid", host.Calls);
+        Assert.Contains("selectTreeNode", host.Calls);
+        Assert.Contains("searchSettings", host.Calls);
+
+        // ClearFilters restore=true invokes restoreFilters
+        await new ClearFiltersHandler().ExecuteAsync(JsonDocument.Parse("""{"restore":true}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("restoreFilters", host.Calls);
+
+        // SetField readBackMismatch triggers when driver returns a different value
+        var mismatchRes = await new SetFieldHandler().ExecuteAsync(JsonDocument.Parse("""{"id":"f1","value":"Different"}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("\"readBackMismatch\"", mismatchRes.ResultJson);
+
+        // AskUser forwards options array and marks file save confirmed ONLY on affirmative save prompt
+        string[]? seenOpts = null;
+        var fileSafety = new AgentSafetyState { HasAttachmentsInTask = true };
+        fileSafety.MarkDirty();
+        var denyAskCtx = ctx with
+        {
+            Safety = fileSafety,
+            AskUserAsync = (_, opts, _) => { seenOpts = opts; return Task.FromResult("No"); }
+        };
+        await new AskUserHandler().ExecuteAsync(JsonDocument.Parse("""{"question":"Save changes?","options":["Yes","No"]}""").RootElement, denyAskCtx, CancellationToken.None);
+        Assert.False(fileSafety.HasAskedFileSaveConfirm);
+
+        var askCtx = ctx with
+        {
+            Safety = fileSafety,
+            AskUserAsync = (_, opts, _) => { seenOpts = opts; return Task.FromResult("Yes"); }
+        };
+        var fileSaveBlocked = await new ClickActionHandler().ExecuteAsync(JsonDocument.Parse("""{"id":"a2"}""").RootElement, askCtx, CancellationToken.None);
+        Assert.Contains("\"needsConfirmation\":true", fileSaveBlocked.ResultJson);
+        await new AskUserHandler().ExecuteAsync(JsonDocument.Parse("""{"question":"Save?","options":["Yes","No"]}""").RootElement, askCtx, CancellationToken.None);
+        Assert.Equal(["Yes", "No"], seenOpts!);
+        Assert.True(fileSafety.HasAskedFileSaveConfirm);
+
+        // WrongRecord checks both SelectedRecordHint AND explicit targetName + Edit dialog field values
+        var wrongRecSafety = new AgentSafetyState { SelectedRecordHint = "Acme" };
+        Assert.NotNull(wrongRecSafety.CheckWrongRecord("""{"inDialog":true,"title":"Edit Beta","dialogText":"Name","fields":[{"value":"Beta Corp"}]}""", "Beta"));
+        Assert.Null(wrongRecSafety.CheckWrongRecord("""{"inDialog":true,"title":"Edit Customer","dialogText":"Name","fields":[{"value":"Acme Corp"}]}""", "Acme"));
+
+        // PickOption rejects placeholder in options array
+        var badPick = await new PickOptionHandler().ExecuteAsync(JsonDocument.Parse("""{"multiSelect":true,"options":["TBD"]}""").RootElement, ctx, CancellationToken.None);
+        Assert.Contains("\"blocked\":true", badPick.ResultJson);
+
+        // AgentServerGuard does NOT trip _deleteRefused on CheckDeleteReadPrerequisite block
+        var prereqGuard = AgentServerGuard.FromTranscript(
+            [new System.Text.Json.Nodes.JsonObject { ["role"] = "tool", ["content"] = """{"ok":false,"blocked":true,"reason":"Inspect the target record on screen or via read_data/select_grid_row before executing a destructive delete."}""" }],
+            new HashSet<string>(["read_data"]));
+        Assert.Null(prereqGuard.CheckBeforeExecute("read_data", """{"source":"customers"}""", JsonDocument.Parse("""{"source":"customers"}""").RootElement));
     }
 
     private sealed class DummyScopeFactory : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory
@@ -423,7 +529,21 @@ public class AgentExtendedTests
         public Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct) => Task.FromResult<LookResponseDto?>(null);
         public Task<AttachmentDownloadDto?> GetAttachmentAsync(string id, CancellationToken ct) => Task.FromResult<AttachmentDownloadDto?>(null);
         public (string Url, bool InDialog) ReadUrlAndDialog(string snapshotJson) => ("", false);
-        public (string Text, string Risk) LookupAction(string snapshotJson, string id) => (id, "read");
+        public (string Text, string Risk) LookupAction(string snapshotJson, string id)
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            if (doc.RootElement.TryGetProperty("actions", out var acts) && acts.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in acts.EnumerateArray())
+                {
+                    if (a.TryGetProperty("id", out var idEl) && idEl.GetString() == id)
+                    {
+                        return (a.GetProperty("text").GetString() ?? id, a.GetProperty("risk").GetString() ?? "read");
+                    }
+                }
+            }
+            return (id, "read");
+        }
         public string LookupFieldLabel(string snapshotJson, string id) => id;
         public bool EvaluateSaveIncomplete(string clickResultJson, string snapshotJson, bool wasInDialog, string risk) => false;
         public string Translate(string key) => key;

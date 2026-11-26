@@ -16,11 +16,14 @@ public sealed record AttachmentDownloadDto(string? Id, string? FileName, string?
 public interface IAgentUiHost
 {
     Task<string> CaptureSnapshotAsync(CancellationToken ct = default);
+    Task<string> CaptureSnapshotAsync(int maxRows, CancellationToken ct = default) => CaptureSnapshotAsync(ct);
     Task<(string? Route, NavRouteDto[] Available)> ResolveRouteAsync(string input, CancellationToken ct);
     Task<string> InvokeDriverStringAsync(string fn, CancellationToken ct, params object?[] args);
     Task InvokeDriverVoidAsync(string fn, CancellationToken ct, params object?[] args);
     void NavigateTo(string route);
     Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct);
+    Task<LookResponseDto?> PostLookAsync(string text, string question, string? imageBase64, string? mediaType, CancellationToken ct) =>
+        PostLookAsync(text, question, ct);
     Task<AttachmentDownloadDto?> GetAttachmentAsync(string id, CancellationToken ct);
     (string Url, bool InDialog) ReadUrlAndDialog(string snapshotJson);
     (string Text, string Risk) LookupAction(string snapshotJson, string id);
@@ -29,6 +32,8 @@ public interface IAgentUiHost
     string Translate(string key);
     string LookupTerm(string term);
     JsonNode? TryParseNode(string json);
+    bool IsVisionEnabled => true;
+    Task ClearPanelStateAsync(CancellationToken ct = default) => Task.CompletedTask;
     Task<(bool Allowed, string? BlockReason)> AuthorizeAsync(
         AgentMode mode, string route, bool inDialog, string actionText, string risk, string targetName,
         string snapshotJson, Func<string, string, CancellationToken, Task<PermissionDecision>> askPermissionAsync, CancellationToken ct);
@@ -40,7 +45,7 @@ public sealed record UiToolContext(
     List<string> Ledger,
     AgentSafetyState Safety,
     Func<string, string, CancellationToken, Task<PermissionDecision>> AskPermissionAsync,
-    Func<string, CancellationToken, Task<string>> AskUserAsync,
+    Func<string, string[]?, CancellationToken, Task<string>> AskUserAsync,
     Func<int, int, int, int, decimal?, Task> OnLookUsageAsync,
     IAgentUiHost Host);
 
@@ -75,8 +80,10 @@ public sealed class ScanScreenHandler : IUiToolHandler
     public string ToolName => "scan_screen";
     public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
+        var rows = args.TryGetProperty("rows", out var rEl) && rEl.TryGetInt32(out var r) ? Math.Clamp(r, 1, 50) : 15;
         await ctx.Host.InvokeDriverVoidAsync("waitForSettle", ct, 800);
-        var snap = await ctx.Host.CaptureSnapshotAsync(ct);
+        var snap = await ctx.Host.CaptureSnapshotAsync(rows, ct);
+        ctx.Safety.MarkRead();
         return new(JsonSerializer.Serialize(new { ok = true, snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
     }
 }
@@ -96,6 +103,7 @@ public sealed class GoToPageHandler : IUiToolHandler
             return new(JsonSerializer.Serialize(new { ok = false, error = $"Unknown or blocked page '{target}'.", availableRoutes = available }), false, null, ctx.CurrentSnapshotJson);
 
         ctx.Host.NavigateTo(route);
+        ctx.Safety.SelectedRecordHint = null;
         await ctx.Host.InvokeDriverVoidAsync("waitForSettle", ct, 1500);
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         return new(JsonSerializer.Serialize(new { ok = true, navigatedTo = route, snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
@@ -120,18 +128,51 @@ public sealed class SetFieldHandler : IUiToolHandler
     {
         var id = UiToolArgs.GetString(args, "id");
         var val = UiToolArgs.GetString(args, "value");
-        if (!AgentSafetyState.IsProvidedValue(val))
+        var delegatedBy = UiToolArgs.GetString(args, "delegatedBy");
+        var wrongRecordErr = ctx.Safety.CheckWrongRecord(ctx.CurrentSnapshotJson, null);
+        if (wrongRecordErr != null)
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = wrongRecordErr }), false, null, ctx.CurrentSnapshotJson);
+
+        if (AgentSafetyState.IsFileLikeFieldValue(val))
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "File paths or raw binary values are not allowed in text fields. Use upload_file_to_screen." }), false, null, ctx.CurrentSnapshotJson);
+
+        if (!AgentSafetyState.IsProvidedValue(val) && !string.Equals(delegatedBy, "user", StringComparison.OrdinalIgnoreCase))
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder or empty value '{val}' is not allowed. Ask the user if missing." }), false, null, ctx.CurrentSnapshotJson);
 
+        var isSensitive = AgentSafetyState.IsSensitiveField(ctx.CurrentSnapshotJson, id);
         var res = await ctx.Host.InvokeDriverStringAsync("setField", ct, id, val);
-        if (UiToolArgs.IsOk(res, ctx.Host))
+        var parsedRes = ctx.Host.TryParseNode(res);
+        var readBack = parsedRes?["fieldValue"] is JsonValue fv && fv.TryGetValue<string>(out var fvs) ? fvs : null;
+        var ok = UiToolArgs.IsOk(res, ctx.Host);
+        var mismatch = ok && !isSensitive && readBack != null && !ValuesMatch(val, readBack);
+
+        if (ok)
         {
             ctx.Safety.MarkDirty();
             var fieldLabel = ctx.Host.LookupFieldLabel(ctx.CurrentSnapshotJson, id);
-            ctx.Ledger.Add($"مقداردهی فیلد|{fieldLabel}: «{val}»");
+            var loggedVal = isSensitive ? "(hidden)" : val;
+            ctx.Ledger.Add($"مقداردهی فیلد|{fieldLabel}: «{loggedVal}»");
         }
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
-        return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+        return new(JsonSerializer.Serialize(new { result = parsedRes, readBackMismatch = mismatch, snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+    }
+
+    private static bool ValuesMatch(string input, string readBack)
+    {
+        var a = input.Trim();
+        var b = readBack.Trim();
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return true;
+        if (b is "true" or "false")
+        {
+            var expectedBool = a.ToLowerInvariant() switch
+            {
+                "true" or "1" or "yes" or "on" or "بله" => "true",
+                "false" or "0" or "no" or "off" or "خیر" => "false",
+                _ => null
+            };
+            return expectedBool == b;
+        }
+        return false;
     }
 }
 
@@ -151,14 +192,26 @@ public sealed class PickOptionHandler : IUiToolHandler
     public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
         var opt = UiToolArgs.GetString(args, "option");
-        if (!AgentSafetyState.IsProvidedValue(opt))
+        var multi = args.TryGetProperty("multiSelect", out var mEl) && mEl.ValueKind == JsonValueKind.True;
+        var optList = args.TryGetProperty("options", out var oEl) && oEl.ValueKind == JsonValueKind.Array
+            ? oEl.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToArray()
+            : null;
+        if (optList is { Length: > 0 })
+        {
+            if (optList.Any(item => !AgentSafetyState.IsProvidedValue(item)))
+                return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "Placeholder or empty option in 'options' array is not allowed." }), false, null, ctx.CurrentSnapshotJson);
+        }
+        else if (!AgentSafetyState.IsProvidedValue(opt))
+        {
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder option '{opt}' is not allowed." }), false, null, ctx.CurrentSnapshotJson);
+        }
 
-        var res = await ctx.Host.InvokeDriverStringAsync("pickOption", ct, opt);
+        var res = await ctx.Host.InvokeDriverStringAsync("pickOption", ct, opt, multi, optList);
         if (UiToolArgs.IsOk(res, ctx.Host))
         {
             ctx.Safety.MarkDirty();
-            ctx.Ledger.Add($"انتخاب گزینه|{opt}");
+            var summaryOpt = optList is { Length: > 0 } ? string.Join(", ", optList) : opt;
+            ctx.Ledger.Add($"انتخاب گزینه|{summaryOpt}");
         }
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
@@ -185,8 +238,20 @@ public sealed class ClickActionHandler : IUiToolHandler
         var (route, wasInDialog) = ctx.Host.ReadUrlAndDialog(ctx.CurrentSnapshotJson);
         var (actionText, risk) = ctx.Host.LookupAction(ctx.CurrentSnapshotJson, id);
 
+        var replacedDeleteErr = ctx.Safety.CheckReplacedDelete(risk);
+        if (replacedDeleteErr != null)
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = replacedDeleteErr }), false, null, ctx.CurrentSnapshotJson);
+
+        var wrongRecordErr = ctx.Safety.CheckWrongRecord(ctx.CurrentSnapshotJson, targetName);
+        if (wrongRecordErr != null)
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = wrongRecordErr }), false, null, ctx.CurrentSnapshotJson);
+
         if (risk == "save")
         {
+            var fileSaveErr = ctx.Safety.CheckFileSaveConfirmationNeeded(risk);
+            if (fileSaveErr != null)
+                return new(JsonSerializer.Serialize(new { ok = false, blocked = true, needsConfirmation = true, reason = fileSaveErr }), false, null, ctx.CurrentSnapshotJson);
+
             var missingReq = AgentSafetyState.FindEmptyRequiredField(ctx.CurrentSnapshotJson);
             if (missingReq != null)
                 return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Required field '{missingReq}' is empty. Fill it or ask the user before saving." }), false, null, ctx.CurrentSnapshotJson);
@@ -194,15 +259,25 @@ public sealed class ClickActionHandler : IUiToolHandler
 
         if (risk == "destructive")
         {
+            var readPrereqErr = ctx.Safety.CheckDeleteReadPrerequisite();
+            if (readPrereqErr != null)
+                return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = readPrereqErr }), false, null, ctx.CurrentSnapshotJson);
+
             var deleteBlocker = AgentSafetyState.CheckDeleteBlockers(ctx.CurrentSnapshotJson, targetName);
             if (deleteBlocker != null)
+            {
+                ctx.Safety.MarkDeleteRefused();
                 return new(JsonSerializer.Serialize(new { ok = false, blocked = true, deleteRefused = true, reason = deleteBlocker }), false, null, ctx.CurrentSnapshotJson);
+            }
         }
 
         var (allowed, blockReason) = await ctx.Host.AuthorizeAsync(
             ctx.Mode, route, wasInDialog, actionText, risk, targetName, ctx.CurrentSnapshotJson, ctx.AskPermissionAsync, ct);
         if (!allowed)
+        {
+            if (risk == "destructive") ctx.Safety.MarkDeleteRefused();
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, deleteRefused = risk == "destructive", reason = blockReason }), false, null, ctx.CurrentSnapshotJson);
+        }
 
         var res = await ctx.Host.InvokeDriverStringAsync("clickAction", ct, id);
         var targetNote = string.IsNullOrWhiteSpace(targetName) ? "" : $" ({targetName})";
@@ -210,6 +285,8 @@ public sealed class ClickActionHandler : IUiToolHandler
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         var saveDidNotComplete = ctx.Host.EvaluateSaveIncomplete(res, snap, wasInDialog, risk);
         var (_, nowInDialog) = ctx.Host.ReadUrlAndDialog(snap);
+        if (wasInDialog && !nowInDialog)
+            ctx.Safety.SelectedRecordHint = null;
         if ((risk is "save" or "destructive" && !saveDidNotComplete) || (wasInDialog && !nowInDialog))
             ctx.Safety.MarkSaved();
         return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), saveDidNotComplete, snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
@@ -232,9 +309,40 @@ public sealed class SelectGridRowHandler : IUiToolHandler
     public string ToolName => "select_grid_row";
     public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
-        var res = await ctx.Host.InvokeDriverStringAsync("selectGridRow", ct, UiToolArgs.GetString(args, "rowId"));
+        var rowId = UiToolArgs.GetString(args, "rowId");
+        var res = await ctx.Host.InvokeDriverStringAsync("selectGridRow", ct, rowId);
+        if (UiToolArgs.IsOk(res, ctx.Host))
+        {
+            ctx.Safety.MarkRead();
+            ctx.Safety.SelectedRecordHint = ExtractRowTextHint(ctx.CurrentSnapshotJson, rowId);
+        }
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+    }
+
+    private static string? ExtractRowTextHint(string snapshotJson, string rowId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            if (!doc.RootElement.TryGetProperty("grids", out var grids) || grids.ValueKind != JsonValueKind.Array) return null;
+            foreach (var g in grids.EnumerateArray())
+            {
+                if (!g.TryGetProperty("rows", out var rows) || rows.ValueKind != JsonValueKind.Array) continue;
+                foreach (var r in rows.EnumerateArray())
+                {
+                    if (r.TryGetProperty("rowId", out var rid) && rid.GetString() == rowId &&
+                        r.TryGetProperty("cells", out var cells) && cells.ValueKind == JsonValueKind.Array)
+                    {
+                        return cells.EnumerateArray()
+                            .Select(c => c.GetString() ?? "")
+                            .FirstOrDefault(s => s.Trim().Length >= 2);
+                    }
+                }
+            }
+        }
+        catch (JsonException) { /* ignore invalid snapshot */ }
+        return null;
     }
 }
 
@@ -243,7 +351,8 @@ public sealed class ClearFiltersHandler : IUiToolHandler
     public string ToolName => "clear_filters";
     public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
-        var res = await ctx.Host.InvokeDriverStringAsync("clearFilters", ct);
+        var restore = args.TryGetProperty("restore", out var rEl) && rEl.ValueKind == JsonValueKind.True;
+        var res = await ctx.Host.InvokeDriverStringAsync(restore ? "restoreFilters" : "clearFilters", ct);
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
     }
@@ -314,13 +423,25 @@ public sealed class LookAtScreenHandler : IUiToolHandler
     public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
         var question = UiToolArgs.GetString(args, "question");
+        var mode = UiToolArgs.GetString(args, "mode");
         var visibleText = await ctx.Host.InvokeDriverStringAsync("captureVisibleText", ct);
-        var lookRes = await ctx.Host.PostLookAsync(visibleText, question, ct);
+        string? imageBase64 = null;
+        string? mediaType = null;
+        if (ctx.Host.IsVisionEnabled && string.Equals(mode, "picture", StringComparison.OrdinalIgnoreCase))
+        {
+            var captured = await ctx.Host.InvokeDriverStringAsync("capturePicture", ct);
+            if (!string.IsNullOrWhiteSpace(captured))
+            {
+                imageBase64 = captured;
+                mediaType = "image/png";
+            }
+        }
+        var lookRes = await ctx.Host.PostLookAsync(visibleText, question, imageBase64, mediaType, ct);
         if (lookRes?.Usage != null)
             await ctx.OnLookUsageAsync(lookRes.Usage.Calls, lookRes.Usage.InputTokens, lookRes.Usage.OutputTokens, lookRes.Usage.CachedInputTokens, lookRes.Usage.Cost);
         if (lookRes == null || !string.IsNullOrWhiteSpace(lookRes.Error))
             return new(JsonSerializer.Serialize(new { ok = false, error = lookRes?.Error ?? "Look failed." }), false, null, ctx.CurrentSnapshotJson);
-        return new(JsonSerializer.Serialize(new { ok = true, answer = lookRes.Text }), false, null, ctx.CurrentSnapshotJson);
+        return new(JsonSerializer.Serialize(new { ok = true, answer = lookRes.Text, usedPicture = imageBase64 != null }), false, null, ctx.CurrentSnapshotJson);
     }
 }
 
@@ -340,8 +461,28 @@ public sealed class AskUserHandler : IUiToolHandler
     public string ToolName => "ask_user";
     public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
-        var answer = await ctx.AskUserAsync(UiToolArgs.GetString(args, "question"), ct);
+        var question = UiToolArgs.GetString(args, "question");
+        var options = args.TryGetProperty("options", out var optEl) && optEl.ValueKind == JsonValueKind.Array
+            ? optEl.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToArray()
+            : null;
+        var answer = await ctx.AskUserAsync(question, options, ct);
+        if (ctx.Safety.HasAttachmentsInTask && ctx.Safety.HasUnsavedChanges && IsSaveConfirmation(question, answer))
+            ctx.Safety.MarkFileSaveConfirmed();
         return new(JsonSerializer.Serialize(new { ok = true, answer }), false, null, ctx.CurrentSnapshotJson);
+    }
+
+    private static bool IsSaveConfirmation(string question, string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer)) return false;
+        var asksSave = question.Contains("save", StringComparison.OrdinalIgnoreCase)
+                    || question.Contains("confirm", StringComparison.OrdinalIgnoreCase)
+                    || question.Contains("ذخیره", StringComparison.Ordinal)
+                    || question.Contains("تایید", StringComparison.Ordinal)
+                    || question.Contains("ثبت", StringComparison.Ordinal);
+        if (!asksSave) return false;
+
+        var norm = answer.Trim().ToLowerInvariant();
+        return norm is not ("no" or "n" or "cancel" or "deny" or "stop" or "خیر" or "نه" or "انصراف" or "لغو");
     }
 }
 

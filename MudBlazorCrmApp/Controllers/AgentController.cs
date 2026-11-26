@@ -26,7 +26,8 @@ public class AgentController(
             MaxPriorTurns = opts.MaxPriorTurns,
             MaxTaskModelCalls = opts.MaxTaskModelCalls,
             MaxTaskCostUsd = opts.MaxTaskCostUsd,
-            ShowCost = opts.ShowCost
+            ShowCost = opts.ShowCost,
+            Vision = opts.Vision
         });
     }
 

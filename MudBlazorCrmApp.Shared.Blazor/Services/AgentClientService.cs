@@ -14,6 +14,8 @@ public sealed class AgentClientService(
     ILogger<AgentClientService> logger) : IDisposable
 {
     public event Action? OnStateChanged;
+    public event Action? OnLogoutCleared;
+    public bool SuppressStateSave { get; private set; }
 
     private bool _isDrawerOpen;
     public bool IsDrawerOpen
@@ -27,10 +29,21 @@ public sealed class AgentClientService(
         }
     }
 
-    public AgentMode Mode { get; set; } = AgentMode.Manual;
+    private AgentMode _mode = AgentMode.Manual;
+    public AgentMode Mode
+    {
+        get => _mode;
+        set
+        {
+            if (_mode == value) return;
+            _mode = value;
+            NotifyChanged();
+        }
+    }
     public bool IsRunning { get; private set; }
     public bool WaitingForUserAnswer { get; private set; }
     public string? PendingQuestion { get; private set; }
+    public string[]? PendingQuestionOptions { get; private set; }
     public bool WaitingForPermission { get; private set; }
     public string? PendingPermissionLabel { get; private set; }
     public string? PendingPermissionRisk { get; private set; }
@@ -71,6 +84,7 @@ public sealed class AgentClientService(
             if (res.MaxTaskModelCalls > 0) MaxTaskModelCalls = res.MaxTaskModelCalls;
             if (res.MaxTaskCostUsd > 0) MaxTaskCostUsd = res.MaxTaskCostUsd;
             ShowCost = res.ShowCost;
+            toolDispatcher.IsVisionEnabled = res.Vision;
             return res.UseAgent;
         }
         catch (Exception ex)
@@ -135,7 +149,7 @@ public sealed class AgentClientService(
     {
         if (bytes.Length == 0 || bytes.Length > MaxAttachmentBytes)
         {
-            AddAttachmentError(fileName, bytes.LongLength, "حداکثر حجم مجاز ۱۰ مگابایت است.");
+            AddAttachmentError(fileName, bytes.LongLength, appText["AGENT_FILE_TOO_BIG"]);
             return;
         }
         var uploadChatKey = CurrentChatKey;
@@ -146,7 +160,7 @@ public sealed class AgentClientService(
             var res = await _stepApi.UploadAttachmentAsync(uploadChatKey, fileName, bytes, ct);
             if (uploadChatKey != CurrentChatKey) return;
             if (res == null || !string.IsNullOrWhiteSpace(res.Error) || string.IsNullOrWhiteSpace(res.Id))
-                AddAttachmentError(fileName, bytes.LongLength, res?.Error ?? "خطا در آپلود فایل");
+                AddAttachmentError(fileName, bytes.LongLength, res?.Error ?? appText["AGENT_FILE_UPLOAD_ERR"]);
             else
                 _attachedFiles.Add(new AttachedFileItem(res.Id, res.FileName ?? fileName, res.Kind ?? "File", res.SizeBytes, res.ExpiresUtc));
         }
@@ -154,7 +168,7 @@ public sealed class AgentClientService(
         {
             logger.LogWarning(ex, "Attachment upload failed.");
             if (uploadChatKey == CurrentChatKey)
-                AddAttachmentError(fileName, bytes.LongLength, "خطا در ارسال فایل");
+                AddAttachmentError(fileName, bytes.LongLength, appText["AGENT_FILE_SEND_ERR"]);
         }
         finally
         {
@@ -178,17 +192,27 @@ public sealed class AgentClientService(
 
     public async Task ClearOnLogoutAsync()
     {
-        CurrentChatKey = NewChatKey();
-        IsDrawerOpen = false;
-        await StopAndWaitAsync();
-        _nextTaskSeq = 1;
-        _entries.Clear();
-        _attachedFiles.Clear(); // clear attachments on logout
-        SavedChats = [];
-        permissionGate.ResetSession();
-        ResetCounters();
-        Mode = AgentMode.Manual;
-        NotifyChanged();
+        SuppressStateSave = true;
+        try
+        {
+            CurrentChatKey = NewChatKey();
+            IsDrawerOpen = false;
+            await StopAndWaitAsync();
+            _nextTaskSeq = 1;
+            _entries.Clear();
+            _attachedFiles.Clear(); // clear attachments on logout
+            SavedChats = [];
+            permissionGate.ResetSession();
+            ResetCounters();
+            Mode = AgentMode.Manual;
+            OnLogoutCleared?.Invoke();
+            NotifyChanged();
+        }
+        finally
+        {
+            await toolDispatcher.ClearPanelStateAsync();
+            SuppressStateSave = false;
+        }
     }
 
     public void Stop()
@@ -215,6 +239,7 @@ public sealed class AgentClientService(
         if (!WaitingForUserAnswer || _userAnswerTcs == null) return;
         WaitingForUserAnswer = false;
         PendingQuestion = null;
+        PendingQuestionOptions = null;
         _entries.Add(new AgentChatEntry("user", answer));
         NotifyChanged();
         _userAnswerTcs.TrySetResult(answer);
@@ -254,12 +279,15 @@ public sealed class AgentClientService(
         var lastSummary = string.Empty;
         try
         {
-            toolDispatcher.ResetSafety();
-            var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
+            var isDeleteGoal = AgentLoopGuards.IsDeleteTaskGoal(goal);
+            var adviceOnlyGoal = AgentLoopGuards.IsReadOnlyAdviceGoal(goal);
             var activeFiles = AttachedFiles.Where(f => f.Error == null && f.ExpiresUtc > DateTime.UtcNow).ToList();
+            toolDispatcher.ResetSafety(isDeleteGoal, activeFiles.Count > 0, adviceOnlyGoal);
+            var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
+            var goalPrefix = isDeleteGoal ? "[Delete task: yes]\n" : string.Empty;
             var taskPrompt = activeFiles.Count == 0
-                ? goal
-                : string.Join("\n", activeFiles.Select(f => $"[att:{f.Id} \"{f.FileName}\", {f.Kind}]")) + "\n" + goal;
+                ? goalPrefix + goal
+                : string.Join("\n", activeFiles.Select(f => $"[att:{f.Id} \"{f.FileName}\", {f.Kind}]")) + "\n" + goalPrefix + goal;
             messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, taskPrompt, snapshotJson);
             lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, ct);
         }
@@ -283,6 +311,8 @@ public sealed class AgentClientService(
     {
         var emptyRetries = 0;
         var finishRetries = 0;
+        var injectedFinalCall = false;
+        var recentSignatures = new List<string>();
         for (var step = 0; step < MaxTaskSteps; step++)
         {
             ct.ThrowIfCancellationRequested();
@@ -290,6 +320,17 @@ public sealed class AgentClientService(
             {
                 _entries.Add(new AgentChatEntry("info", $"Task budget reached (calls: {run.Calls}/{MaxTaskModelCalls}, cost: ${run.Cost:0.0000}/${MaxTaskCostUsd:0.00})."));
                 return string.Empty;
+            }
+
+            if (!injectedFinalCall && AgentLoopGuards.ShouldInjectPredictiveFinalCall(
+                    step, MaxTaskSteps, run.Calls, MaxTaskModelCalls, run.Cost, MaxTaskCostUsd))
+            {
+                injectedFinalCall = true;
+                messages.Add(JsonSerializer.Serialize(new
+                {
+                    role = "user",
+                    content = "[final call] Step or budget limit approaching. Summarize what you completed or found so far cleanly without extra tool loops."
+                }));
             }
 
             var stepRes = await _stepApi.PostStepAsync(messages, run, ct);
@@ -302,7 +343,12 @@ public sealed class AgentClientService(
             if (!string.IsNullOrWhiteSpace(stepRes.Error)) { _entries.Add(new AgentChatEntry("error", stepRes.Error)); return string.Empty; }
             if (string.IsNullOrWhiteSpace(stepRes.Assistant)) { _entries.Add(new AgentChatEntry("error", "Assistant returned an empty message.")); return string.Empty; }
 
-            foreach (var p in stepRes.Prior ?? []) { messages.Add(p); AgentClientTranscriptHelper.TryLogPriorMessage(p, _entries, logger); }
+            foreach (var p in stepRes.Prior ?? [])
+            {
+                messages.Add(p);
+                AgentClientTranscriptHelper.TryLogPriorMessage(p, _entries, logger);
+                TryLogHelpContextNote(p);
+            }
             messages.Add(stepRes.Assistant);
 
             if (!AgentClientTranscriptHelper.TryParseToolCalls(stepRes.Assistant, out var textReply, out var toolCalls))
@@ -335,31 +381,65 @@ public sealed class AgentClientService(
                     }
                 }
                 var summaryText = string.IsNullOrWhiteSpace(textReply) ? appText["AGENT_EMPTY_REPLY"] : textReply;
-                var summary = AgentClientTranscriptHelper.AppendLedger(summaryText, ledger);
+                var summary = AgentClientTranscriptHelper.AppendLedger(summaryText, ledger, appText["AGENT_ACTIONS_DONE"]);
                 _entries.Add(new AgentChatEntry("assistant", summary));
                 return summary;
             }
 
             emptyRetries = 0;
             var serverResults = AgentClientTranscriptHelper.ParseServerToolResults(stepRes.ServerToolResults, logger);
-            var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, snapshotJson, ct);
+            var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, recentSignatures, snapshotJson, ct);
             snapshotJson = updatedSnap;
             if (finished) return finalSummary;
+
+            var loopWarning = AgentLoopGuards.DetectLoop(recentSignatures);
+            if (loopWarning != null)
+            {
+                messages.Add(JsonSerializer.Serialize(new { role = "user", content = loopWarning }));
+            }
             NotifyChanged();
         }
         return string.Empty;
     }
 
+    private void TryLogHelpContextNote(string raw)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("role", out var r) || r.GetString() != "user") return;
+            var content = doc.RootElement.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String
+                ? c.GetString()
+                : null;
+            if (!string.IsNullOrWhiteSpace(content) &&
+                (content.Contains("Relevant CRM Guide Context", StringComparison.Ordinal) ||
+                 content.Contains("Knowledge notes", StringComparison.Ordinal)))
+            {
+                _entries.Add(new AgentChatEntry("help", content));
+            }
+        }
+        catch (JsonException ex)
+        {
+            logger.LogDebug(ex, "Skipped malformed prior context note JSON.");
+        }
+    }
+
     private async Task<(bool Finished, string Summary, string SnapshotJson)> ExecuteToolBatchAsync(
         List<AgentToolCall> toolCalls, Dictionary<string, string> serverResults, TaskRunState run,
-        List<string> messages, List<string> ledger, string snapshotJson, CancellationToken ct)
+        List<string> messages, List<string> ledger, List<string> recentSignatures, string snapshotJson, CancellationToken ct)
     {
         foreach (var call in toolCalls)
         {
             _entries.Add(new AgentChatEntry("tool", $"{call.Name}({call.ArgsJson})"));
+            recentSignatures.Add($"{call.Name}:{call.ArgsJson.Trim()}");
             NotifyChanged();
 
-            if (serverResults.TryGetValue(call.Id, out var serverMsg)) { messages.Add(serverMsg); continue; }
+            if (serverResults.TryGetValue(call.Id, out var serverMsg))
+            {
+                if (call.Name == "read_data") toolDispatcher.MarkRecordRead();
+                messages.Add(serverMsg);
+                continue;
+            }
 
             var (resJson, isFinish, summary, updatedSnap) = await toolDispatcher.ExecuteAsync(
                 call.Name, call.ArgsJson, snapshotJson, Mode, ledger, AskPermissionAsync, AskUserAsync,
@@ -369,7 +449,7 @@ public sealed class AgentClientService(
 
             if (isFinish)
             {
-                var finalSummary = AgentClientTranscriptHelper.AppendLedger(summary ?? string.Empty, ledger);
+                var finalSummary = AgentClientTranscriptHelper.AppendLedger(summary ?? string.Empty, ledger, appText["AGENT_ACTIONS_DONE"]);
                 _entries.Add(new AgentChatEntry("assistant", finalSummary));
                 return (true, finalSummary, snapshotJson);
             }
@@ -413,9 +493,10 @@ public sealed class AgentClientService(
         return await _permissionTcs.Task;
     }
 
-    private async Task<string> AskUserAsync(string question, CancellationToken ct)
+    private async Task<string> AskUserAsync(string question, string[]? options, CancellationToken ct)
     {
         PendingQuestion = question;
+        PendingQuestionOptions = options is { Length: > 0 } ? options : null;
         WaitingForUserAnswer = true;
         _userAnswerTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _entries.Add(new AgentChatEntry("question", question));
@@ -444,7 +525,7 @@ public sealed class AgentClientService(
 
     private void ResetPromptState()
     {
-        WaitingForUserAnswer = false; PendingQuestion = null;
+        WaitingForUserAnswer = false; PendingQuestion = null; PendingQuestionOptions = null;
         WaitingForPermission = false; PendingPermissionLabel = null; PendingPermissionRisk = null;
     }
 
