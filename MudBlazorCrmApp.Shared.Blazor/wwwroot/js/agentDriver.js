@@ -177,7 +177,8 @@ window.crmAgentDriver = (function () {
             actions: actions.slice(0, 40),
             lookupOptions,
             errors,
-            toasts
+            toasts,
+            navRoutes: getNavRouteList()
         });
     }
 
@@ -363,7 +364,7 @@ window.crmAgentDriver = (function () {
         return JSON.stringify({ ok: true, headers });
     }
 
-    function getNavRoutes() {
+    function getNavRouteList() {
         const blocked = new Set(['/logout', '/account/changepassword', '/login', '/register', '/user']);
         const links = Array.from(document.querySelectorAll('.mud-navmenu a.mud-nav-link, a.mud-nav-link'));
         const seen = new Set();
@@ -379,7 +380,11 @@ window.crmAgentDriver = (function () {
             seen.add(key);
             routes.push({ href: normHref, text });
         });
-        return JSON.stringify(routes);
+        return routes;
+    }
+
+    function getNavRoutes() {
+        return JSON.stringify(getNavRouteList());
     }
 
     function waitForSettle(maxMs) {
