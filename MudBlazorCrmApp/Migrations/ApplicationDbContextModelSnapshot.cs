@@ -182,7 +182,77 @@ namespace MudBlazorCrmApp.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId", "ChatKey")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "UpdatedDate");
+
                     b.ToTable("AgentChat");
+                });
+
+            modelBuilder.Entity("MudBlazorCrmApp.Models.AgentKnowledge", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ConfirmCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fact")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FactHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsRetired")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LanguageId")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastUsedDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModifiedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("NotHelpedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UseCount")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FactHash")
+                        .IsUnique();
+
+                    b.HasIndex("IsRetired");
+
+                    b.ToTable("AgentKnowledge");
                 });
 
             modelBuilder.Entity("MudBlazorCrmApp.Models.AgentTask", b =>
@@ -200,6 +270,7 @@ namespace MudBlazorCrmApp.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Cost")
+                        .HasPrecision(19, 8)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedDate")
@@ -242,6 +313,11 @@ namespace MudBlazorCrmApp.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedDate");
+
+                    b.HasIndex("UserId", "ChatKey", "TaskSeq")
+                        .IsUnique();
 
                     b.ToTable("AgentTask");
                 });

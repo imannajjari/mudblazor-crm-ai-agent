@@ -1,16 +1,22 @@
+using System.Net;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MudBlazorCrmApp.Controllers;
+using MudBlazorCrmApp.Data;
+using MudBlazorCrmApp.Models;
 using MudBlazorCrmApp.Services.Agent;
 using MudBlazorCrmApp.Shared.Blazor.Services.Agent;
+using MudBlazorCrmApp.Shared.Models;
 using Xunit;
 
 namespace MudBlazorCrmApp.Tests;
@@ -646,6 +652,270 @@ public class AgentExtendedTests
         finally
         {
             Directory.Delete(tempHelpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Wave3_HelpSessionStore_And_SearchHelpServerTool_DeduplicatePerChat()
+    {
+        var store = new HelpSessionStore(new MemoryCache(new MemoryCacheOptions()));
+        Assert.True(store.TryMarkSent("u1", "c1", "Pipeline"));
+        Assert.False(store.TryMarkSent("u1", "c1", "Pipeline"));
+        Assert.True(store.TryMarkSent("u1", "c2", "Pipeline"));
+
+        var catalog = new StubHelpCatalog([new HelpSearchHit("Pipeline", "Drag deals between stages", 3)]);
+        var tool = new SearchHelpServerTool(catalog, store);
+        var args = JsonDocument.Parse("""{"query":"pipeline"}""").RootElement;
+        var ctx = new ServerToolContext("u1", "c3", "en", false, []);
+
+        var first = await tool.ExecuteAsync(args, ctx, CancellationToken.None);
+        Assert.Contains("Drag deals between stages", first);
+        var second = await tool.ExecuteAsync(args, ctx, CancellationToken.None);
+        Assert.Contains("\"alreadyShown\":true", second);
+    }
+
+    [Fact]
+    public void Wave3_ModelPrice_And_CostCalculator_ResolveBuiltInAndFallbackRates()
+    {
+        var fallbackOpts = new AgentOptions { InputPricePerMillionTokensUsd = 0.25m, OutputPricePerMillionTokensUsd = 0.75m };
+        var claudeRates = AgentModelPrice.Resolve("claude-sonnet-4-20250514", fallbackOpts);
+        Assert.Equal(3.00m, claudeRates.InputPerMillion);
+        Assert.Equal(15.00m, claudeRates.OutputPerMillion);
+
+        var fbRates = AgentModelPrice.Resolve("custom-local-model", fallbackOpts);
+        Assert.Equal(0.25m, fbRates.InputPerMillion);
+        Assert.Equal(0.75m, fbRates.OutputPerMillion);
+
+        var usage = new AgentUsageModel { Calls = 1, InputTokens = 1_000_000, OutputTokens = 1_000_000 };
+        AgentCostCalculator.Compute(usage, new AgentOptions { Model = "gemini-2.5-flash" }, "claude-sonnet-4-20250514");
+        Assert.Equal(18.00m, usage.Cost);
+    }
+
+    [Fact]
+    public async Task Wave3_AnthropicProvider_TranslatesMessagesToolsAndUsage()
+    {
+        string? seenUri = null;
+        string? seenApiKey = null;
+        string? seenVersion = null;
+        string? seenBody = null;
+
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            seenUri = req.RequestUri?.ToString();
+            seenApiKey = req.Headers.TryGetValues("x-api-key", out var k) ? k.FirstOrDefault() : null;
+            seenVersion = req.Headers.TryGetValues("anthropic-version", out var v) ? v.FirstOrDefault() : null;
+            seenBody = req.Content?.ReadAsStringAsync().Result;
+            const string json = """
+                {
+                  "content": [
+                    { "type": "text", "text": "Checking." },
+                    { "type": "tool_use", "id": "tu_1", "name": "read_data", "input": { "source": "customers" } }
+                  ],
+                  "usage": { "input_tokens": 120, "output_tokens": 30, "cache_read_input_tokens": 40 }
+                }
+                """;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        });
+
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.anthropic.com/v1/") };
+        var opts = Options.Create(new AgentOptions { Provider = "Anthropic", ApiKey = "sk-ant-test", Model = "claude-sonnet-4" });
+        var provider = new AnthropicAgentLlmProvider(client, opts, NullLogger<AnthropicAgentLlmProvider>.Instance);
+
+        var messages = new List<JsonObject>
+        {
+            new() { ["role"] = "system", ["content"] = "System instructions" },
+            new() { ["role"] = "user", ["content"] = "List customers" }
+        };
+        var result = await provider.CompleteAsync(messages, [AgentToolSchemas.GetTools()[0]], "claude-haiku-4", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal("https://api.anthropic.com/v1/messages", seenUri);
+        Assert.Equal("sk-ant-test", seenApiKey);
+        Assert.Equal("2023-06-01", seenVersion);
+        Assert.Contains("\"model\":\"claude-haiku-4\"", seenBody);
+        Assert.Equal(160, result.Usage.InputTokens);
+        Assert.Equal(40, result.Usage.CachedInputTokens);
+        Assert.Equal(30, result.Usage.OutputTokens);
+        Assert.Contains("read_data", result.AssistantJson);
+    }
+
+    [Fact]
+    public async Task Wave3_ChartService_Tool_And_WidgetParser_RoundTrip()
+    {
+        var tool = new AgentChartServerTool();
+        var args = JsonDocument.Parse("""{"title":"Deals","points":[{"label":"Won","value":4},{"label":"Open","value":2}]}""").RootElement;
+        var res = await tool.ExecuteAsync(args, new ServerToolContext("u", "c", "en", false, []), CancellationToken.None);
+        Assert.Contains("[[chart|Deals|Won:4,Open:2]]", res);
+
+        var parsed = AgentWidgetParser.Parse("Summary\n[[chart|Deals|Won:4,Open:2]]");
+        Assert.Single(parsed.Charts);
+        Assert.Equal("Deals", parsed.Charts[0].Title);
+        Assert.Equal(100.0, parsed.Charts[0].Bars[0].PercentWidth);
+        Assert.Equal(50.0, parsed.Charts[0].Bars[1].PercentWidth);
+    }
+
+    [Fact]
+    public async Task Wave3_DataServiceCatalog_And_ChatController_HistoryPruning_And_Stats()
+    {
+        var catalog = AgentDataService.GetCatalogDescription();
+        foreach (var src in new[] { "addresses", "products", "product_categories", "services", "service_categories", "vendors", "rewards", "tags", "communications" })
+            Assert.Contains($"`{src}`", catalog);
+
+        var dbOpts = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite("DataSource=:memory:").Options;
+        await using var db = new ApplicationDbContext(dbOpts);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+
+        db.AgentChat.Add(new AgentChat { UserId = "u1", ChatKey = "old_chat", Title = "Old", UpdatedDate = DateTime.UtcNow.AddDays(-120) });
+        db.AgentChat.Add(new AgentChat { UserId = "u1", ChatKey = "new_chat", Title = "New", UpdatedDate = DateTime.UtcNow });
+        db.AgentTask.Add(new AgentTask { UserId = "u1", ChatKey = "new_chat", TaskSeq = 1, Goal = "G1", InputTokens = 100, OutputTokens = 50, Cost = 0.0125m, ModelCalls = 2 });
+        await db.SaveChangesAsync();
+
+        var opts = Options.Create(new AgentOptions { Enabled = true, HistoryDays = 90 });
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var attachSvc = new AgentAttachmentService(new DummyScopeFactory(), new MemoryCacheRateLimiter(cache), new AgentAttachmentPolicy(opts), opts, NullLogger<AgentAttachmentService>.Instance);
+        var ctrl = new AgentChatController(db, attachSvc, opts)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "u1")], "test"))
+                }
+            }
+        };
+
+        var detailAction = await ctrl.GetAsync("new_chat", CancellationToken.None);
+        var detailRes = Assert.IsType<OkObjectResult>(detailAction.Result);
+        var json = JsonSerializer.Serialize(detailRes.Value);
+        Assert.Contains("\"TotalInputTokens\":100", json);
+        Assert.Contains("\"TotalCalls\":2", json);
+
+        await ctrl.PutAsync("fresh_chat", new AgentChatController.AgentChatSaveRequest("Fresh", "[]", "[]"), CancellationToken.None);
+        Assert.False(await db.AgentChat.AnyAsync(c => c.ChatKey == "old_chat"));
+        Assert.True(await db.AgentChat.AnyAsync(c => c.ChatKey == "fresh_chat"));
+    }
+
+    [Fact]
+    public async Task Wave3_AgentService_EnforcesDailyQuota_And_LookTracksUsageAndVisionModel()
+    {
+        var capturedModels = new List<string?>();
+        var provider = new ModelCapturingLlmProvider(capturedModels);
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var opts = Options.Create(new AgentOptions
+        {
+            MaxStepsPerDay = 1,
+            Vision = true,
+            VisionModel = "vision-pro",
+            FastModel = "fast-mini",
+            Model = "main-model"
+        });
+        var counter = new AgentUsageCounter();
+        var svc = new AgentService(provider, new MemoryCacheRateLimiter(cache), [], opts, NullLogger<AgentService>.Instance, usageCounter: counter, memoryCache: cache);
+
+        var req = new AgentStepRequestModel { Messages = ["""{"role":"user","content":"hi"}"""], ChatKey = "c1" };
+        var okRes = await svc.StepAsync(req, "quota-user", CancellationToken.None);
+        Assert.Null(okRes.Error);
+        var blockedRes = await svc.StepAsync(req, "quota-user", CancellationToken.None);
+        Assert.Contains("Daily agent step limit reached", blockedRes.Error);
+
+        var valid1x1Png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        var blockedLook = await svc.LookAsync(new AgentLookRequestModel { Image = valid1x1Png, MediaType = "image/png", Question = "What is visible?" }, "quota-user", CancellationToken.None);
+        Assert.Contains("Daily agent step limit reached", blockedLook.Error);
+
+        var lookRes = await svc.LookAsync(new AgentLookRequestModel { Image = valid1x1Png, MediaType = "image/png", Question = "What is visible?" }, "look-user", CancellationToken.None);
+        Assert.Null(lookRes.Error);
+        Assert.Equal("vision-pro", capturedModels.Last());
+        Assert.True(counter.Total.Calls >= 1);
+    }
+
+    [Fact]
+    public void Wave3_ReadDataSchema_And_Prompts_MatchRegisteredToolsAndSources()
+    {
+        var readDataTool = AgentToolSchemas.GetTools()
+            .First(t => t.GetProperty("function").GetProperty("name").GetString() == "read_data");
+        var enumValues = readDataTool.GetProperty("function").GetProperty("parameters")
+            .GetProperty("properties").GetProperty("source").GetProperty("enum")
+            .EnumerateArray().Select(e => e.GetString()).ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("products", enumValues);
+        Assert.Contains("addresses", enumValues);
+        Assert.Contains("communications", enumValues);
+        Assert.Contains("tags", enumValues);
+        Assert.Equal(18, enumValues.Count);
+
+        Assert.DoesNotContain("remember_fact", AgentPrompts.MainSystemPrompt, StringComparison.Ordinal);
+        Assert.Contains("`remember`", AgentPrompts.MainSystemPrompt, StringComparison.Ordinal);
+
+        var parsedNeg = AgentWidgetParser.Parse("[[chart|Balance|Loss:-5,Gain:10]]");
+        Assert.Single(parsedNeg.Charts);
+        Assert.Equal(-5, parsedNeg.Charts[0].Bars[0].Value);
+        Assert.Equal(0.0, parsedNeg.Charts[0].Bars[0].PercentWidth);
+        Assert.Equal(100.0, parsedNeg.Charts[0].Bars[1].PercentWidth);
+    }
+
+    [Fact]
+    public async Task Wave3_AnthropicProvider_MergesConsecutiveUserAndToolResultTurns()
+    {
+        JsonNode? sentPayload = null;
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            sentPayload = JsonNode.Parse(req.Content!.ReadAsStringAsync().Result);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"content":[{"type":"text","text":"All done"}],"usage":{"input_tokens":10,"output_tokens":5}}""", Encoding.UTF8, "application/json")
+            };
+        });
+
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.anthropic.com/v1/") };
+        var opts = Options.Create(new AgentOptions { Provider = "Anthropic", ApiKey = "sk-ant-test", Model = "claude-sonnet-4" });
+        var provider = new AnthropicAgentLlmProvider(client, opts, NullLogger<AnthropicAgentLlmProvider>.Instance);
+
+        var messages = new List<JsonObject>
+        {
+            new() { ["role"] = "user", ["content"] = "Help note" },
+            new() { ["role"] = "user", ["content"] = "Actual request" },
+            new()
+            {
+                ["role"] = "assistant",
+                ["content"] = "",
+                ["tool_calls"] = new JsonArray
+                {
+                    new JsonObject { ["id"] = "tc1", ["type"] = "function", ["function"] = new JsonObject { ["name"] = "read_data", ["arguments"] = "{}" } },
+                    new JsonObject { ["id"] = "tc2", ["type"] = "function", ["function"] = new JsonObject { ["name"] = "search_help", ["arguments"] = "{}" } }
+                }
+            },
+            new() { ["role"] = "tool", ["tool_call_id"] = "tc1", ["content"] = """{"ok":true}""" },
+            new() { ["role"] = "tool", ["tool_call_id"] = "tc2", ["content"] = """{"ok":true}""" },
+            new() { ["role"] = "user", ["content"] = "[final call]" }
+        };
+
+        var res = await provider.CompleteAsync(messages, null, null, CancellationToken.None);
+        Assert.Null(res.Error);
+        var sentMsgs = sentPayload!["messages"]!.AsArray();
+        Assert.Equal(3, sentMsgs.Count);
+        Assert.Equal("user", sentMsgs[0]!["role"]!.GetValue<string>());
+        Assert.Equal(2, sentMsgs[0]!["content"]!.AsArray().Count);
+        Assert.Equal("assistant", sentMsgs[1]!["role"]!.GetValue<string>());
+        Assert.Equal("user", sentMsgs[2]!["role"]!.GetValue<string>());
+        Assert.Equal(3, sentMsgs[2]!["content"]!.AsArray().Count);
+    }
+
+    private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(responder(request));
+    }
+
+    private sealed class ModelCapturingLlmProvider(List<string?> capturedModels) : IAgentLlmProvider
+    {
+        public Task<LlmCallResult> CompleteAsync(IReadOnlyList<JsonObject> messages, JsonElement[]? tools, CancellationToken cancellationToken) =>
+            CompleteAsync(messages, tools, null, cancellationToken);
+
+        public Task<LlmCallResult> CompleteAsync(IReadOnlyList<JsonObject> messages, JsonElement[]? tools, string? modelOverride, CancellationToken cancellationToken)
+        {
+            capturedModels.Add(modelOverride);
+            return Task.FromResult(new LlmCallResult("""{"role":"assistant","content":"Done"}""", new AgentUsageModel { Calls = 1, InputTokens = 5, OutputTokens = 5 }, null));
         }
     }
 

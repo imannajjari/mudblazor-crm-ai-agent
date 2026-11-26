@@ -1,30 +1,31 @@
-@page "/user"
+﻿@page "/user"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject HttpClient HttpClient
 @attribute [Authorize(Roles = "Administrator")]
+@inject AppText L
 
-<PageTitle>User</PageTitle>
+<PageTitle>@L["ENT_USER"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">User</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_USER"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="ApplicationUserDto" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
         <PropertyColumn Property="x => x!.Email" />
-        <PropertyColumn Property="x => x!.PhoneNumber" Title="Phone Number" />
-        <PropertyColumn Property="x => x!.FirstName" Title="First Name" />
-        <PropertyColumn Property="x => x!.LastName" Title="Last Name" />
+        <PropertyColumn Property="x => x!.PhoneNumber" Title="@L["FLD_PHONE_NUMBER"]" />
+        <PropertyColumn Property="x => x!.FirstName" Title="@L["FLD_FIRST_NAME"]" />
+        <PropertyColumn Property="x => x!.LastName" Title="@L["FLD_LAST_NAME"]" />
         <PropertyColumn Property="x => x!.Title" />
-        <PropertyColumn Property="x => x!.CompanyName" Title="Company Name" />
-        <TemplateColumn Title="Photo" Sortable="false" Filterable="false">
+        <PropertyColumn Property="x => x!.CompanyName" Title="@L["FLD_COMPANY_NAME"]" />
+        <TemplateColumn Title="@L["FLD_PHOTO"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @if (!string.IsNullOrEmpty(context.Item!.Photo))
                 {
@@ -35,9 +36,9 @@
         <TemplateColumn StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Badge" Size="@Size.Small" Title="Roles" OnClick="@(e => OnModifyRoles(context.Item!))"  />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Badge" Size="@Size.Small" Title="@L["ENT_ROLES"]" OnClick="@(e => OnModifyRoles(context.Item!))"  />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -94,7 +95,7 @@
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<AddUser>("Add User", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddUser>(L["ADD_USER"], dialogOptions);
         var result = await dialogRef.Result;
 
         if (!result.Canceled)
@@ -117,7 +118,7 @@
         DialogParameters<UpdateUser> dialogParams = new() { { x => x.Id, record.Id } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<UpdateUser>("Update User", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateUser>(L["UPD_USER"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
 
         if (!result.Canceled)
@@ -129,10 +130,10 @@
     private async void OnDelete(ApplicationUserDto record)
     {
         var result = await DialogService.ShowMessageBoxAsync(
-            "Warning",
-            "Are you sure you want to delete this record?",
-            "Delete",
-            "Cancel");
+            L["UI_WARNING"],
+            L["UI_DELETE_CONFIRM"],
+            L["ACTION_DELETE"],
+            L["ACTION_CANCEL"]);
 
         if (result.GetValueOrDefault(false))
         {

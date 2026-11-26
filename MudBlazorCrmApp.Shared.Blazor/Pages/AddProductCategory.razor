@@ -1,16 +1,17 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 <EditForm Model="@record" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Add Product Category</MudText>
+            <MudText Typo="Typo.h6">@L["ADD_PRODUCT_CATEGORY"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-            <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="Description" />
+            <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+            <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="@L["FLD_DESCRIPTION"]" />
             <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Icon = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                 <ActivatorContent>
                     <MudIconButton Color="Color.Info"
@@ -22,13 +23,13 @@
             {
                 <MudImage Src="@GetAbsoluteUri(record.Icon)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
             }
-            <MudTextField @bind-Value="record.TaxRate" For="@(() => record.TaxRate)" Label="TaxRate" />
-            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
+            <MudTextField @bind-Value="record.TaxRate" For="@(() => record.TaxRate)" Label="@L["FLD_TAX_RATE"]" />
+            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
 
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Add</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["ACTION_ADD"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

@@ -1,14 +1,15 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
+@inject AppText L
 
 <EditForm Model="@record" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Communication</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_COMMUNICATION"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudSelect @bind-Value="record.Type" Label="Type" For="@(() => record.Type)">
+            <MudSelect @bind-Value="record.Type" Label="@L["FLD_TYPE"]" For="@(() => record.Type)">
                 <MudSelectItem Value="@("Email")">Email</MudSelectItem>
                 <MudSelectItem Value="@("Call")">Call</MudSelectItem>
                 <MudSelectItem Value="@("Meeting")">Meeting</MudSelectItem>
@@ -18,36 +19,36 @@
                 <MudSelectItem Value="@("InPerson")">In Person</MudSelectItem>
                 <MudSelectItem Value="@("SocialMedia")">Social Media</MudSelectItem>
             </MudSelect>
-            <MudSelect @bind-Value="record.Direction" Label="Direction" For="@(() => record.Direction)">
+            <MudSelect @bind-Value="record.Direction" Label="@L["FLD_DIRECTION"]" For="@(() => record.Direction)">
                 <MudSelectItem Value="@("Outbound")">Outbound</MudSelectItem>
                 <MudSelectItem Value="@("Inbound")">Inbound</MudSelectItem>
             </MudSelect>
-            <MudTextField @bind-Value="record.Subject" For="@(() => record.Subject)" Label="Subject" />
-            <MudTextField @bind-Value="record.Body" For="@(() => record.Body)" Label="Body" Lines="4" />
-            <MudSelect @bind-Value="record.Status" Label="Status" For="@(() => record.Status)">
+            <MudTextField @bind-Value="record.Subject" For="@(() => record.Subject)" Label="@L["FLD_SUBJECT"]" />
+            <MudTextField @bind-Value="record.Body" For="@(() => record.Body)" Label="@L["FLD_BODY"]" Lines="4" />
+            <MudSelect @bind-Value="record.Status" Label="@L["FLD_STATUS"]" For="@(() => record.Status)">
                 <MudSelectItem Value="@("Completed")">Completed</MudSelectItem>
                 <MudSelectItem Value="@("Pending")">Pending</MudSelectItem>
                 <MudSelectItem Value="@("Scheduled")">Scheduled</MudSelectItem>
                 <MudSelectItem Value="@("Cancelled")">Cancelled</MudSelectItem>
             </MudSelect>
-            <MudNumericField @bind-Value="record.ContactId" For="@(() => record.ContactId)" Label="Contact Id" />
-            <MudNumericField @bind-Value="record.CustomerId" For="@(() => record.CustomerId)" Label="Customer Id" />
-            <MudNumericField @bind-Value="record.LeadId" For="@(() => record.LeadId)" Label="Lead Id" />
-            <MudNumericField @bind-Value="record.OpportunityId" For="@(() => record.OpportunityId)" Label="Opportunity Id" />
-            <MudNumericField @bind-Value="record.SupportCaseId" For="@(() => record.SupportCaseId)" Label="Support Case Id" />
-            <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.CommunicationDate" For="@(() => record.CommunicationDate)" Label="Date" />
-            <MudNumericField @bind-Value="record.DurationMinutes" For="@(() => record.DurationMinutes)" Label="Duration (minutes)" />
-            <MudTextField @bind-Value="record.Outcome" For="@(() => record.Outcome)" Label="Outcome" />
-            <MudCheckBox @bind-Value="record.FollowUpRequired" For="@(() => record.FollowUpRequired)" Label="Follow-up Required" />
+            <MudNumericField @bind-Value="record.ContactId" For="@(() => record.ContactId)" Label="@L["FLD_CONTACT_ID"]" />
+            <MudNumericField @bind-Value="record.CustomerId" For="@(() => record.CustomerId)" Label="@L["FLD_CUSTOMER_ID"]" />
+            <MudNumericField @bind-Value="record.LeadId" For="@(() => record.LeadId)" Label="@L["FLD_LEAD_ID"]" />
+            <MudNumericField @bind-Value="record.OpportunityId" For="@(() => record.OpportunityId)" Label="@L["FLD_OPPORTUNITY_ID"]" />
+            <MudNumericField @bind-Value="record.SupportCaseId" For="@(() => record.SupportCaseId)" Label="@L["FLD_SUPPORT_CASE_ID"]" />
+            <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.CommunicationDate" For="@(() => record.CommunicationDate)" Label="@L["FLD_DATE"]" />
+            <MudNumericField @bind-Value="record.DurationMinutes" For="@(() => record.DurationMinutes)" Label="@L["FLD_DURATION_MIN"]" />
+            <MudTextField @bind-Value="record.Outcome" For="@(() => record.Outcome)" Label="@L["FLD_OUTCOME"]" />
+            <MudCheckBox @bind-Value="record.FollowUpRequired" For="@(() => record.FollowUpRequired)" Label="@L["FLD_FOLLOWUP_REQ"]" />
             @if (record.FollowUpRequired)
             {
-                <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.FollowUpDate" For="@(() => record.FollowUpDate)" Label="Follow-up Date" />
+                <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.FollowUpDate" For="@(() => record.FollowUpDate)" Label="@L["FLD_FOLLOWUP_DATE"]" />
             }
-            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" Lines="3" />
+            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" Lines="3" />
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

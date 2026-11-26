@@ -52,11 +52,12 @@ internal sealed class SectionParser
     {
         var bodyText = string.Join("\n", _currentBody).Trim();
         _currentBody.Clear();
-        if (!string.IsNullOrWhiteSpace(bodyText))
-            _result.Add(new HelpSection(
-                _currentTitle,
-                bodyText,
-                AgentHelpService.Tokenize(_currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+        if (string.IsNullOrWhiteSpace(bodyText)) return;
+
+        var freqs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tok in AgentHelpService.Tokenize(_currentTitle + " " + bodyText))
+            freqs[tok] = freqs.GetValueOrDefault(tok) + 1;
+        _result.Add(new HelpSection(_currentTitle, bodyText, freqs));
     }
 
     private static bool TryParseHeader(string line, out int level, out string title)

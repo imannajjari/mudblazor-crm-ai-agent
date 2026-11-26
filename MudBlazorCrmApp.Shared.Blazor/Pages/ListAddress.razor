@@ -1,36 +1,37 @@
-@page "/address"
+﻿@page "/address"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject HttpClient HttpClient
 @inject IJSRuntime JSRuntime
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Address</PageTitle>
+<PageTitle>@L["ENT_ADDRESS"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Address</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_ADDRESS"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="Address" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Address</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_ADDRESS"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
-         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">Export</MudButton>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">@L["ACTION_EXPORT"]</MudButton>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Street" Title="Street" />
-        <PropertyColumn Property="x => x!.City" Title="City" />
-        <PropertyColumn Property="x => x!.State" Title="State" />
-        <PropertyColumn Property="x => x!.ZipCode" Title="ZipCode" />
-        <PropertyColumn Property="x => x!.Country" Title="Country" />
-        <TemplateColumn Title="Photo" Sortable="false" Filterable="false">
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Street" Title="@L["FLD_STREET"]" />
+        <PropertyColumn Property="x => x!.City" Title="@L["FLD_CITY"]" />
+        <PropertyColumn Property="x => x!.State" Title="@L["FLD_STATE"]" />
+        <PropertyColumn Property="x => x!.ZipCode" Title="@L["FLD_ZIP_CODE"]" />
+        <PropertyColumn Property="x => x!.Country" Title="@L["FLD_COUNTRY"]" />
+        <TemplateColumn Title="@L["FLD_PHOTO"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @if (!string.IsNullOrEmpty(context.Item!.Photo))
                 {
@@ -38,14 +39,14 @@
                 }
             </CellTemplate>
         </TemplateColumn>
-        <PropertyColumn Property="x => x!.Notes" Title="Notes" />
-        <PropertyColumn Property="x => x!.CreatedDate" Title="Created Date" />
-        <PropertyColumn Property="x => x!.ModifiedDate" Title="Modified Date" />
+        <PropertyColumn Property="x => x!.Notes" Title="@L["FLD_NOTES"]" />
+        <PropertyColumn Property="x => x!.CreatedDate" Title="@L["FLD_CREATED_DATE"]" />
+        <PropertyColumn Property="x => x!.ModifiedDate" Title="@L["FLD_MODIFIED_DATE"]" />
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -140,7 +141,7 @@
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<AddAddress>("Add Address", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddAddress>(L["ADD_ADDRESS"], dialogOptions);
         var result = await dialogRef.Result;
 
         if (result is { Canceled: false })
@@ -154,7 +155,7 @@
         DialogParameters<UpdateAddress> dialogParams = new() { { x => x.Id, record.Id!.Value } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<UpdateAddress>("Update Address", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateAddress>(L["UPD_ADDRESS"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
 
         if (result is { Canceled: false })
@@ -166,10 +167,10 @@
     private async void OnDelete(Address record)
     {
         var result = await DialogService.ShowMessageBoxAsync(
-            "Warning",
-            "Are you sure you want to delete this record?",
-            "Delete",
-            "Cancel");
+            L["UI_WARNING"],
+            L["UI_DELETE_CONFIRM"],
+            L["ACTION_DELETE"],
+            L["ACTION_CANCEL"]);
 
         if (result.GetValueOrDefault(false))
         {

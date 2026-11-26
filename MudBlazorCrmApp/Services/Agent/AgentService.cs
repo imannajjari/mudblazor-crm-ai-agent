@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace MudBlazorCrmApp.Services.Agent;
@@ -14,13 +16,15 @@ public sealed class AgentService(
     AgentHelpLlmAdvisor? helpAdvisor = null,
     AgentKnowledgeService? knowledgeService = null,
     IHttpContextAccessor? httpContextAccessor = null,
-    AgentUsageCounter? usageCounter = null)
+    AgentUsageCounter? usageCounter = null,
+    IMemoryCache? memoryCache = null)
 {
     private const int MaxTranscriptMessages = 400;
     private const int MaxServerHops = 4;
     private const int MaxLookTextChars = 30_000;
     private const int MaxLookQuestionChars = 2_000;
     private const int MaxLookImageBytes = 4 * 1024 * 1024;
+    private static readonly ConcurrentDictionary<string, object> DailyQuotaLocks = new(StringComparer.Ordinal);
 
     private readonly Dictionary<string, IServerToolHandler> _serverToolMap =
         serverTools.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -38,11 +42,11 @@ public sealed class AgentService(
         if (!rateLimiter.TryAcquire(userKey, options.MaxCallsPerUserPerMinute))
             return new AgentStepResponseModel { Error = "Too many agent requests in a minute. Wait a moment and try again." };
 
-        if (options.MaxStepsPerDay > 0 && !rateLimiter.TryAcquireWindow($"agent_day:{userKey}", options.MaxStepsPerDay, TimeSpan.FromDays(1)))
-            return new AgentStepResponseModel { Error = "Daily agent step limit reached. Try again tomorrow." };
-
         if (!TryParseMessages(request.Messages, out var parsedMessages))
             return new AgentStepResponseModel { Error = "The conversation sent to the agent is not valid." };
+
+        if (!TryAcquireDailyQuota(userKey, options.MaxStepsPerDay))
+            return new AgentStepResponseModel { Error = "Daily agent step limit reached. Try again tomorrow." };
 
         var totalUsage = new AgentUsageModel();
         var httpContext = httpContextAccessor?.HttpContext;
@@ -95,21 +99,24 @@ public sealed class AgentService(
 
         var firstUserMsg = AgentServerGuard.ExtractGoalText(lastUser.TrimStart());
 
-        if (isHowTo && helpAdvisor != null)
-        {
-            var (autoHelp, sideUsage) = await helpAdvisor.BuildAutoHelpContextAsync(firstUserMsg, ct);
-            AgentCostCalculator.Compute(sideUsage, options);
-            AgentCostCalculator.Accumulate(totalUsage, sideUsage);
-            if (!string.IsNullOrWhiteSpace(autoHelp))
-                extraNotes.Add($"Relevant CRM Guide Context (auto-retrieved):\n{autoHelp}");
-        }
+        var helpTask = isHowTo && helpAdvisor != null
+            ? helpAdvisor.BuildAutoHelpContextAsync(firstUserMsg, ct)
+            : Task.FromResult<(string? Context, AgentUsageModel Usage)>((null, new AgentUsageModel()));
+        var knowledgeTask = knowledgeService != null
+            ? knowledgeService.BuildContextNotesAsync(firstUserMsg, language, ct)
+            : Task.FromResult<(string? NotesMessage, string? TimingNote)>((null, null));
 
-        if (knowledgeService != null)
-        {
-            var (notes, _) = await knowledgeService.BuildContextNotesAsync(firstUserMsg, language, ct);
-            if (!string.IsNullOrWhiteSpace(notes))
-                extraNotes.Add(notes);
-        }
+        await Task.WhenAll(helpTask, knowledgeTask);
+
+        var (autoHelp, sideUsage) = await helpTask;
+        AgentCostCalculator.Compute(sideUsage, options, options.FastModel);
+        AgentCostCalculator.Accumulate(totalUsage, sideUsage);
+        if (!string.IsNullOrWhiteSpace(autoHelp))
+            extraNotes.Add($"Relevant CRM Guide Context (auto-retrieved):\n{autoHelp}");
+
+        var (notes, _) = await knowledgeTask;
+        if (!string.IsNullOrWhiteSpace(notes))
+            extraNotes.Add(notes);
 
         return (AgentPrompts.MainSystemPrompt, extraNotes);
     }
@@ -287,6 +294,9 @@ public sealed class AgentService(
         if (!string.IsNullOrEmpty(request.Text) && request.Text.Length > MaxLookTextChars)
             return new AgentLookResponseModel { Error = "Visible screen text is too long." };
 
+        if (!TryAcquireDailyQuota(userKey, options.MaxStepsPerDay))
+            return new AgentLookResponseModel { Error = "Daily agent step limit reached. Try again tomorrow." };
+
         var userContent = new JsonArray();
         var screenText = request.Text ?? "";
         userContent.Add(new JsonObject { ["type"] = "text", ["text"] = $"Question: {request.Question}\n\nVisible screen text:\n{screenText}" });
@@ -326,9 +336,10 @@ public sealed class AgentService(
             new() { ["role"] = "user", ["content"] = string.IsNullOrWhiteSpace(request.Image) ? (JsonNode)JsonValue.Create($"Question: {request.Question}\n\nVisible screen text:\n{screenText}")! : userContent }
         };
 
-        var modelOverride = string.IsNullOrWhiteSpace(request.Image) ? null : options.VisionModel;
-        var result = await provider.CompleteAsync(messages, tools: null, modelOverride, cancellationToken);
-        AgentCostCalculator.Compute(result.Usage, options);
+        var lookModel = string.IsNullOrWhiteSpace(request.Image) ? options.FastModel : options.VisionModel;
+        var result = await provider.CompleteAsync(messages, tools: null, lookModel, cancellationToken);
+        AgentCostCalculator.Compute(result.Usage, options, lookModel);
+        usageCounter?.Add(result.Usage);
         if (result.Error != null)
             return new AgentLookResponseModel { Error = result.Error, Usage = result.Usage };
 
@@ -360,6 +371,22 @@ public sealed class AgentService(
     {
         if (counter != null && counter.Total.Calls > 0)
             AgentCostCalculator.Accumulate(total, counter.Total);
+    }
+
+    private bool TryAcquireDailyQuota(string userKey, int maxStepsPerDay)
+    {
+        if (maxStepsPerDay <= 0) return true;
+        if (memoryCache == null)
+            return rateLimiter.TryAcquireWindow($"agent_day:{userKey}", maxStepsPerDay, TimeSpan.FromDays(1));
+        var cacheKey = $"agent:daily:{userKey}:{DateTime.UtcNow:yyyyMMdd}";
+        var userLock = DailyQuotaLocks.GetOrAdd(cacheKey, static _ => new object());
+        lock (userLock)
+        {
+            var count = memoryCache.Get<int>(cacheKey);
+            if (count >= maxStepsPerDay) return false;
+            memoryCache.Set(cacheKey, count + 1, TimeSpan.FromDays(1));
+            return true;
+        }
     }
 
     private static AgentStepResponseModel BuildSuccess(string assistant, List<string> prior, List<string> serverResults, List<string> timings, AgentUsageModel usage, AgentOptions options) =>

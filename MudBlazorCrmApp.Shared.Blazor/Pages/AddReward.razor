@@ -1,24 +1,25 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 <EditForm Model="@record" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Add Contact Rewards</MudText>
+            <MudText Typo="Typo.h6">@L["ADD_CONTACT_REWARDS"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudNumericField @bind-Value="record.Rewardpoints" For="@(() => record.Rewardpoints)" Label="Rewardpoints" />
-            <MudNumericField @bind-Value="record.CreditsDollars" For="@(() => record.CreditsDollars)" Label="CreditsDollars" />
-            <MudNumericField @bind-Value="record.ConversionRate" For="@(() => record.ConversionRate)" Label="ConversionRate" />
-            <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.ExpirationDate" For="@(() => record.ExpirationDate)" Label="ExpirationDate" />
-            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
+            <MudNumericField @bind-Value="record.Rewardpoints" For="@(() => record.Rewardpoints)" Label="@L["FLD_REWARD_POINTS"]" />
+            <MudNumericField @bind-Value="record.CreditsDollars" For="@(() => record.CreditsDollars)" Label="@L["FLD_CREDITS_DOLLARS"]" />
+            <MudNumericField @bind-Value="record.ConversionRate" For="@(() => record.ConversionRate)" Label="@L["RPT_CONVERSION_RATE"]" />
+            <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.ExpirationDate" For="@(() => record.ExpirationDate)" Label="@L["FLD_EXPIRATION_DATE"]" />
+            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
 
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Add</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["ACTION_ADD"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

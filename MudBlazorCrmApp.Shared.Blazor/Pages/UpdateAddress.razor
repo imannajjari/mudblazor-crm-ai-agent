@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Address</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_ADDRESS"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -23,15 +24,15 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Address</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_ADDRESS"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Street" For="@(() => record.Street)" Label="Street" />
-                <MudTextField @bind-Value="record.City" For="@(() => record.City)" Label="City" />
-                <MudTextField @bind-Value="record.State" For="@(() => record.State)" Label="State" />
-                <MudNumericField @bind-Value="record.ZipCode" For="@(() => record.ZipCode)" Label="ZipCode" />
-                <MudTextField @bind-Value="record.Country" For="@(() => record.Country)" Label="Country" />
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Street" For="@(() => record.Street)" Label="@L["FLD_STREET"]" />
+                <MudTextField @bind-Value="record.City" For="@(() => record.City)" Label="@L["FLD_CITY"]" />
+                <MudTextField @bind-Value="record.State" For="@(() => record.State)" Label="@L["FLD_STATE"]" />
+                <MudNumericField @bind-Value="record.ZipCode" For="@(() => record.ZipCode)" Label="@L["FLD_ZIP_CODE"]" />
+                <MudTextField @bind-Value="record.Country" For="@(() => record.Country)" Label="@L["FLD_COUNTRY"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Photo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -43,12 +44,12 @@ else
                 {
                     <MudImage Src="@GetAbsoluteUri(record.Photo)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
                 }
-                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
+                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
 
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

@@ -1,30 +1,31 @@
+@inject AppText L
 ﻿﻿<MudDialog>
     <DialogContent>
         <MudForm Model="PassedData">
             <MudPaper Elevation="25" Class="pa-2 rounded-lg">
                 <MudGrid>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="PassedData.Name" Label="Name" Placeholder="Name" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.Name" Label="@L["FLD_NAME"]" Placeholder="@L["FLD_NAME"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="PassedData.Description" Label="Description" Placeholder="Description" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.Description" Label="@L["FLD_DESCRIPTION"]" Placeholder="@L["FLD_DESCRIPTION"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <MudTextField @bind-Value="PassedData.FollowupDate" Label="Follow-up Date" Placeholder="Followup Date" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.FollowupDate" Label="@L["FLD_FOLLOWUP_DATE"]" Placeholder="@L["FLD_FOLLOWUP_DATE"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <MudTextField @bind-Value="PassedData.DueDate" Label="Due Date" Placeholder="Due Date" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.DueDate" Label="@L["FLD_DUE_DATE"]" Placeholder="@L["FLD_DUE_DATE"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="PassedData.Notes" Label="Notes" Placeholder="Notes" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.Notes" Label="@L["FLD_NOTES"]" Placeholder="@L["FLD_NOTES"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                 </MudGrid>
             </MudPaper>
         </MudForm>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Color="Color.Primary" OnClick="Submit">Submit</MudButton>
+        <MudButton OnClick="Cancel">@L["ACTION_CANCEL"]</MudButton>
+        <MudButton Color="Color.Primary" OnClick="Submit">@L["UI_SUBMIT"]</MudButton>
     </DialogActions>
 </MudDialog>
 

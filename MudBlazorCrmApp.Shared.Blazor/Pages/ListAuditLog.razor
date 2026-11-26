@@ -5,17 +5,18 @@
 @inject HttpClient HttpClient
 @inject IJSRuntime JSRuntime
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Audit Log</PageTitle>
+<PageTitle>@L["ENT_AUDIT_LOG"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Audit Log</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_AUDIT_LOG"]</MudText>
 </div>
 
 <MudPaper Class="pa-4 mb-4">
     <MudGrid>
         <MudItem xs="12" sm="6" md="3">
-            <MudSelect T="string" Label="Entity Type" @bind-Value="_filterEntityType" @bind-Value:after="OnFilterChanged" Clearable="true">
+            <MudSelect T="string" Label="@L["FLD_ENTITY_TYPE"]" @bind-Value="_filterEntityType" @bind-Value:after="OnFilterChanged" Clearable="true">
                 <MudSelectItem Value="@("Customer")">Customer</MudSelectItem>
                 <MudSelectItem Value="@("Contact")">Contact</MudSelectItem>
                 <MudSelectItem Value="@("Lead")">Lead</MudSelectItem>
@@ -26,7 +27,7 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudSelect T="string" Label="Change Type" @bind-Value="_filterChangeType" @bind-Value:after="OnFilterChanged" Clearable="true">
+            <MudSelect T="string" Label="@L["FLD_CHANGE_TYPE"]" @bind-Value="_filterChangeType" @bind-Value:after="OnFilterChanged" Clearable="true">
                 <MudSelectItem Value="@("Insert")">Insert</MudSelectItem>
                 <MudSelectItem Value="@("Update")">Update</MudSelectItem>
                 <MudSelectItem Value="@("Delete")">Delete</MudSelectItem>
@@ -35,39 +36,39 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudDatePicker Label="Start Date" @bind-Date="_startDate" @bind-Date:after="OnFilterChanged" Clearable="true" />
+            <MudDatePicker Label="@L["FLD_START_DATE"]" @bind-Date="_startDate" @bind-Date:after="OnFilterChanged" Clearable="true" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudDatePicker Label="End Date" @bind-Date="_endDate" @bind-Date:after="OnFilterChanged" Clearable="true" />
+            <MudDatePicker Label="@L["FLD_END_DATE"]" @bind-Date="_endDate" @bind-Date:after="OnFilterChanged" Clearable="true" />
         </MudItem>
     </MudGrid>
 </MudPaper>
 
 <MudDataGrid T="AuditLog" @ref="grid" ServerData="@ServerReload" Filterable="true" Dense="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Audit Trail</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_AUDIT_TRAIL"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
-         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">Export</MudButton>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">@L["ACTION_EXPORT"]</MudButton>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Timestamp" Title="Timestamp" Format="yyyy-MM-dd HH:mm:ss" />
-        <PropertyColumn Property="x => x!.UserName" Title="User" />
-        <PropertyColumn Property="x => x!.EntityType" Title="Entity Type" />
-        <PropertyColumn Property="x => x!.EntityId" Title="Entity ID" />
-        <TemplateColumn Title="Change Type">
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Timestamp" Title="@L["FLD_TIMESTAMP"]" Format="yyyy-MM-dd HH:mm:ss" />
+        <PropertyColumn Property="x => x!.UserName" Title="@L["ENT_USER"]" />
+        <PropertyColumn Property="x => x!.EntityType" Title="@L["FLD_ENTITY_TYPE"]" />
+        <PropertyColumn Property="x => x!.EntityId" Title="@L["FLD_ENTITY_ID"]" />
+        <TemplateColumn Title="@L["FLD_CHANGE_TYPE"]">
             <CellTemplate>
                 <MudChip T="string" Size="Size.Small" Color="@GetChangeTypeColor(context.Item!.ChangeType)">
                     @context.Item!.ChangeType
                 </MudChip>
             </CellTemplate>
         </TemplateColumn>
-        <PropertyColumn Property="x => x!.ChangedProperties" Title="Changed Fields" />
+        <PropertyColumn Property="x => x!.ChangedProperties" Title="@L["FLD_CHANGED_FIELDS"]" />
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Visibility" Size="@Size.Small" Title="View Details" OnClick="@(e => OnViewDetails(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Visibility" Size="@Size.Small" Title="@L["UI_VIEW_DETAILS"]" OnClick="@(e => OnViewDetails(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>

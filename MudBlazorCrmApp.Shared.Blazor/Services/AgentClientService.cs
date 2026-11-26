@@ -113,6 +113,10 @@ public sealed class AgentClientService(
         _entries.AddRange(AgentClientTranscriptHelper.DeserializeHistory(detail.HistoryJson, chatKey, logger));
         permissionGate.ResetSession();
         ResetCounters();
+        TotalCalls = detail.TotalCalls;
+        TotalInputTokens = detail.TotalInputTokens;
+        TotalOutputTokens = detail.TotalOutputTokens;
+        TotalCost = detail.TotalCost;
         NotifyChanged();
     }
 

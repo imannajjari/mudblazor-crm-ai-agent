@@ -176,6 +176,29 @@
                                                 }
                                             </div>
                                         }
+                                        @if (parsed.Charts.Count > 0)
+                                        {
+                                            <div class="d-flex flex-column gap-2 mb-2" data-testid="agent-widget-charts">
+                                                @foreach (var chart in parsed.Charts)
+                                                {
+                                                    <div class="pa-2 rounded" style="border:1px solid var(--mud-palette-divider);background:var(--mud-palette-background);">
+                                                        <MudText Typo="Typo.caption" Class="mb-1"><b>@chart.Title</b></MudText>
+                                                        @foreach (var bar in chart.Bars)
+                                                        {
+                                                            <div class="mb-1">
+                                                                <div class="d-flex justify-space-between">
+                                                                    <MudText Typo="Typo.caption">@bar.Label</MudText>
+                                                                    <MudText Typo="Typo.caption"><b>@bar.Value.ToString("0.##")</b></MudText>
+                                                                </div>
+                                                                <div style="height:6px;border-radius:3px;background:var(--mud-palette-divider);overflow:hidden;">
+                                                                    <div style="@($"height:100%;width:{bar.PercentWidth.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%;background:var(--mud-palette-primary);")"></div>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
                                         @if (!string.IsNullOrWhiteSpace(parsed.MarkdownText))
                                         {
                                             <div class="mud-typography mud-typography-body2" style="line-height:1.65;">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(parsed.MarkdownText))</div>

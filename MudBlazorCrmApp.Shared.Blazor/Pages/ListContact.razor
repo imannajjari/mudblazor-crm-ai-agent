@@ -1,4 +1,4 @@
-@page "/contact"
+﻿@page "/contact"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -6,34 +6,35 @@
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Contact</PageTitle>
+<PageTitle>@L["ENT_CONTACT"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Contact</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_CONTACT"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="Contact" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Contact</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_CONTACT"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
-         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">Export</MudButton>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">@L["ACTION_EXPORT"]</MudButton>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Name" Title="Name" />
-        <PropertyColumn Property="x => x!.Company" Title="Company" />
-        <PropertyColumn Property="x => x!.Title" Title="Title" />
-        <PropertyColumn Property="x => x!.Email" Title="Email" />
-        <PropertyColumn Property="x => x!.Phone" Title="Phone" />
-        <PropertyColumn Property="x => x!.Role" Title="Role" />
-        <PropertyColumn Property="x => x!.Status" Title="Status" />
-        <TemplateColumn Title="Photo" Sortable="false" Filterable="false">
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Name" Title="@L["FLD_NAME"]" />
+        <PropertyColumn Property="x => x!.Company" Title="@L["FLD_COMPANY"]" />
+        <PropertyColumn Property="x => x!.Title" Title="@L["FLD_TITLE"]" />
+        <PropertyColumn Property="x => x!.Email" Title="@L["FLD_EMAIL"]" />
+        <PropertyColumn Property="x => x!.Phone" Title="@L["FLD_PHONE"]" />
+        <PropertyColumn Property="x => x!.Role" Title="@L["FLD_ROLE"]" />
+        <PropertyColumn Property="x => x!.Status" Title="@L["FLD_STATUS"]" />
+        <TemplateColumn Title="@L["FLD_PHOTO"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @if (!string.IsNullOrEmpty(context.Item!.Photo))
                 {
@@ -41,8 +42,8 @@
                 }
             </CellTemplate>
         </TemplateColumn>
-        <PropertyColumn @ref="addressColumn" Property="x => x!.Address != null ? x.Address.City : null" Title="Address" />
-        <TemplateColumn Title="Reward" Sortable="false" Filterable="false">
+        <PropertyColumn @ref="addressColumn" Property="x => x!.Address != null ? x.Address.City : null" Title="@L["ENT_ADDRESS"]" />
+        <TemplateColumn Title="@L["ENT_REWARD"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @string.Join(", ", context.Item.Reward?.Select(x => x.Rewardpoints?.ToString() ?? string.Empty) ?? [])
             </CellTemplate>
@@ -52,10 +53,10 @@
                 <MudStack Row="true">
                     @if (!string.IsNullOrEmpty(context.Item!.Email))
                     {
-                        <MudIconButton Icon="@Icons.Material.Outlined.Email" Size="@Size.Small" Title="Send Email" OnClick="@(e => OnSendEmail(context.Item!))" />
+                        <MudIconButton Icon="@Icons.Material.Outlined.Email" Size="@Size.Small" Title="@L["UI_SEND_EMAIL"]" OnClick="@(e => OnSendEmail(context.Item!))" />
                     }
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -170,7 +171,7 @@
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<AddContact>("Add Contact", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddContact>(L["ADD_CONTACT"], dialogOptions);
         var result = await dialogRef.Result;
 
         if (result is { Canceled: false })
@@ -184,7 +185,7 @@
         DialogParameters<UpdateContact> dialogParams = new() { { x => x.Id, record.Id!.Value } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<UpdateContact>("Update Contact", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateContact>(L["UPD_CONTACT"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
 
         if (result is { Canceled: false })
@@ -209,10 +210,10 @@
     private async void OnDelete(Contact record)
     {
         var result = await DialogService.ShowMessageBoxAsync(
-            "Warning",
-            "Are you sure you want to delete this record?",
-            "Delete",
-            "Cancel");
+            L["UI_WARNING"],
+            L["UI_DELETE_CONFIRM"],
+            L["ACTION_DELETE"],
+            L["ACTION_CANCEL"]);
 
         if (result.GetValueOrDefault(false))
         {

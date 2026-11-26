@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 <EditForm Model="@record" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Add Opportunity</MudText>
+            <MudText Typo="Typo.h6">@L["ADD_OPPORTUNITY"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-            <MudNumericField @bind-Value="record.Value" For="@(() => record.Value)" Label="Value ($)" />
-            <MudNumericField @bind-Value="record.Probability" For="@(() => record.Probability)" Label="Probability (%)" Min="0" Max="100" />
-            <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.EstimatedCloseDate" For="@(() => record.EstimatedCloseDate)" Label="Estimated Close Date" />
-            <MudSelect @bind-Value="record.Stage" Label="Stage" AnchorOrigin="Origin.BottomCenter">
+            <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+            <MudNumericField @bind-Value="record.Value" For="@(() => record.Value)" Label="@L["FLD_VALUE_USD"]" />
+            <MudNumericField @bind-Value="record.Probability" For="@(() => record.Probability)" Label="@L["FLD_PROBABILITY"]" Min="0" Max="100" />
+            <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.EstimatedCloseDate" For="@(() => record.EstimatedCloseDate)" Label="@L["FLD_EST_CLOSE_DATE"]" />
+            <MudSelect @bind-Value="record.Stage" Label="@L["FLD_STAGE"]" AnchorOrigin="Origin.BottomCenter">
                 <MudSelectItem Value="@("Prospecting")">Prospecting</MudSelectItem>
                 <MudSelectItem Value="@("Qualification")">Qualification</MudSelectItem>
                 <MudSelectItem Value="@("Proposal")">Proposal</MudSelectItem>
@@ -21,7 +22,7 @@
                 <MudSelectItem Value="@("Closed Won")">Closed Won</MudSelectItem>
                 <MudSelectItem Value="@("Closed Lost")">Closed Lost</MudSelectItem>
             </MudSelect>
-            <MudSelect T="long?" @bind-Value="record.CustomerId" Label="Customer" AnchorOrigin="Origin.BottomCenter" Clearable="true">
+            <MudSelect T="long?" @bind-Value="record.CustomerId" Label="@L["ENT_CUSTOMER"]" AnchorOrigin="Origin.BottomCenter" Clearable="true">
                 @if (customers != null)
                 {
                     @foreach (var customer in customers)
@@ -30,7 +31,7 @@
                     }
                 }
             </MudSelect>
-            <MudSelect T="long?" @bind-Value="record.ContactId" Label="Contact" AnchorOrigin="Origin.BottomCenter" Clearable="true">
+            <MudSelect T="long?" @bind-Value="record.ContactId" Label="@L["ENT_CONTACT"]" AnchorOrigin="Origin.BottomCenter" Clearable="true">
                 @if (contacts != null)
                 {
                     @foreach (var contact in contacts)
@@ -50,12 +51,12 @@
             {
                 <MudImage Src="@GetAbsoluteUri(record.Icon)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
             }
-            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
+            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
 
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Add</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["ACTION_ADD"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

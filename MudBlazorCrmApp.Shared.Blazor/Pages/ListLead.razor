@@ -1,4 +1,4 @@
-@page "/lead"
+﻿@page "/lead"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -6,30 +6,31 @@
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Lead</PageTitle>
+<PageTitle>@L["ENT_LEAD"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Lead</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_LEAD"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="Lead" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Lead</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_LEAD"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
-         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">Export</MudButton>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">@L["ACTION_EXPORT"]</MudButton>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Source" Title="Source" />
-        <PropertyColumn Property="x => x!.Status" Title="Status" />
-        <PropertyColumn Property="x => x!.PotentialValue" Title="PotentialValue" />
-        <TemplateColumn Title="Photo" Sortable="false" Filterable="false">
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Source" Title="@L["FLD_SOURCE"]" />
+        <PropertyColumn Property="x => x!.Status" Title="@L["FLD_STATUS"]" />
+        <PropertyColumn Property="x => x!.PotentialValue" Title="@L["FLD_POTENTIAL_VALUE"]" />
+        <TemplateColumn Title="@L["FLD_PHOTO"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @if (!string.IsNullOrEmpty(context.Item!.Photo))
                 {
@@ -37,17 +38,17 @@
                 }
             </CellTemplate>
         </TemplateColumn>
-        <PropertyColumn Property="x => x!.Notes" Title="Notes" />
-        <PropertyColumn @ref="addressColumn" Property="x => x!.Address != null ? x.Address.City : null" Title="Address" />
-        <PropertyColumn @ref="opportunityColumn" Property="x => x!.Opportunity != null ? x.Opportunity.Stage : null" Title="Opportunity" />
-        <PropertyColumn @ref="contactColumn" Property="x => x!.Contact != null ? x.Contact.Name : null" Title="Contact" />
-        <PropertyColumn Property="x => x!.CreatedDate" Title="Created Date" />
-        <PropertyColumn Property="x => x!.ModifiedDate" Title="Modified Date" />
+        <PropertyColumn Property="x => x!.Notes" Title="@L["FLD_NOTES"]" />
+        <PropertyColumn @ref="addressColumn" Property="x => x!.Address != null ? x.Address.City : null" Title="@L["ENT_ADDRESS"]" />
+        <PropertyColumn @ref="opportunityColumn" Property="x => x!.Opportunity != null ? x.Opportunity.Stage : null" Title="@L["ENT_OPPORTUNITY"]" />
+        <PropertyColumn @ref="contactColumn" Property="x => x!.Contact != null ? x.Contact.Name : null" Title="@L["ENT_CONTACT"]" />
+        <PropertyColumn Property="x => x!.CreatedDate" Title="@L["FLD_CREATED_DATE"]" />
+        <PropertyColumn Property="x => x!.ModifiedDate" Title="@L["FLD_MODIFIED_DATE"]" />
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -178,7 +179,7 @@
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<AddLead>("Add Lead", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddLead>(L["ADD_LEAD"], dialogOptions);
         var result = await dialogRef.Result;
 
         if (!result.Canceled)
@@ -192,7 +193,7 @@
         DialogParameters<UpdateLead> dialogParams = new() { { x => x.Id, record.Id!.Value } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<UpdateLead>("Update Lead", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateLead>(L["UPD_LEAD"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
 
         if (!result.Canceled)
@@ -204,10 +205,10 @@
     private async void OnDelete(Lead record)
     {
         var result = await DialogService.ShowMessageBoxAsync(
-            "Warning",
-            "Are you sure you want to delete this record?",
-            "Delete",
-            "Cancel");
+            L["UI_WARNING"],
+            L["UI_DELETE_CONFIRM"],
+            L["ACTION_DELETE"],
+            L["ACTION_CANCEL"]);
 
         if (result.GetValueOrDefault(false))
         {

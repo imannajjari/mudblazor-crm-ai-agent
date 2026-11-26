@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
+@inject AppText L
 
 <EditForm Model="@record" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Add Tag</MudText>
+            <MudText Typo="Typo.h6">@L["ADD_TAG"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-            <MudColorPicker @bind-Text="record.Color" Label="Color" Style="@($"color: {record.Color};")" Placeholder="Select Color" />
+            <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+            <MudColorPicker @bind-Text="record.Color" Label="@L["FLD_COLOR"]" Style="@($"color: {record.Color};")" Placeholder="@L["UI_SELECT_COLOR"]" />
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Add</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["ACTION_ADD"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

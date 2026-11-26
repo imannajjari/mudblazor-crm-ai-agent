@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 <EditForm Model="@record" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Add Address</MudText>
+            <MudText Typo="Typo.h6">@L["ADD_ADDRESS"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="record.Street" For="@(() => record.Street)" Label="Street" />
-            <MudTextField @bind-Value="record.City" For="@(() => record.City)" Label="City" />
-            <MudTextField @bind-Value="record.State" For="@(() => record.State)" Label="State" />
-            <MudNumericField @bind-Value="record.ZipCode" For="@(() => record.ZipCode)" Label="ZipCode" />
-            <MudTextField @bind-Value="record.Country" For="@(() => record.Country)" Label="Country" />
+            <MudTextField @bind-Value="record.Street" For="@(() => record.Street)" Label="@L["FLD_STREET"]" />
+            <MudTextField @bind-Value="record.City" For="@(() => record.City)" Label="@L["FLD_CITY"]" />
+            <MudTextField @bind-Value="record.State" For="@(() => record.State)" Label="@L["FLD_STATE"]" />
+            <MudNumericField @bind-Value="record.ZipCode" For="@(() => record.ZipCode)" Label="@L["FLD_ZIP_CODE"]" />
+            <MudTextField @bind-Value="record.Country" For="@(() => record.Country)" Label="@L["FLD_COUNTRY"]" />
             <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Photo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                 <ActivatorContent>
                     <MudIconButton Color="Color.Info"
@@ -25,12 +26,12 @@
             {
                 <MudImage Src="@GetAbsoluteUri(record.Photo)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
             }
-            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
+            <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
 
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Add</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["ACTION_ADD"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

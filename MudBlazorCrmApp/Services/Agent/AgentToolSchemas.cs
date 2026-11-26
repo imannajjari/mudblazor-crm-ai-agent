@@ -8,7 +8,7 @@ public static class AgentToolSchemas
     private static readonly JsonElement[] HowToTools = Phase3Tools
         .Where(t => t.TryGetProperty("function", out var fn) &&
                     fn.TryGetProperty("name", out var n) &&
-                    n.GetString() is "read_data" or "ask_help" or "get_help_page"
+                    n.GetString() is "read_data" or "ask_help" or "get_help_page" or "search_help"
                         or "lookup_term" or "ask_knowledge" or "scan_menus" or "search_settings"
                         or "list_attachments" or "read_attachment" or "ask_attachment" or "finish")
         .ToArray();
@@ -19,6 +19,7 @@ public static class AgentToolSchemas
     private static JsonElement[] BuildPhase3Tools()
     {
         var readDataCatalog = AgentDataService.GetCatalogDescription().Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n");
+        var readDataSourcesJson = AgentDataService.GetSourceEnumJson();
         var json = $$"""
         [
           {
@@ -31,7 +32,7 @@ public static class AgentToolSchemas
                 "properties": {
                   "source": {
                     "type": "string",
-                    "enum": ["dashboard_kpis", "customers", "contacts", "leads", "opportunities", "sales", "support_cases", "activities", "todo_tasks"]
+                    "enum": {{readDataSourcesJson}}
                   },
                   "top": { "type": "integer" },
                   "skip": { "type": "integer" },
@@ -52,6 +53,19 @@ public static class AgentToolSchemas
                 "type": "object",
                 "properties": { "question": { "type": "string" } },
                 "required": ["question"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_help",
+              "description": "Search CRM user guide sections directly with BM25 ranking without extra LLM summarization.",
+              "parameters": {
+                "type": "object",
+                "properties": { "query": { "type": "string" } },
+                "required": ["query"],
                 "additionalProperties": false
               }
             }
@@ -504,6 +518,33 @@ public static class AgentToolSchemas
                   "action": { "type": "string" }
                 },
                 "required": ["action"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "create_chart",
+              "description": "Build a safe inline [[chart|Title|label:value,...]] mini bar-chart widget for the response.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "title": { "type": "string" },
+                  "points": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": { "type": "string" },
+                        "value": { "type": "number" }
+                      },
+                      "required": ["label", "value"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["title", "points"],
                 "additionalProperties": false
               }
             }

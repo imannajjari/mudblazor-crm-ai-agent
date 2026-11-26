@@ -177,13 +177,16 @@ builder.Services.AddHttpClient("Loopback")
     });
 builder.Services.AddSingleton<IAgentRateLimiter, MemoryCacheRateLimiter>();
 builder.Services.AddSingleton<IAgentHelpCatalog, AgentHelpService>();
+builder.Services.AddSingleton<HelpSessionStore>();
 builder.Services.AddSingleton<AgentAttachmentPolicy>();
 builder.Services.AddScoped<AgentUsageCounter>();
 builder.Services.AddScoped<AgentHelpLlmAdvisor>();
 builder.Services.AddScoped<IAgentDataReader, AgentDataService>();
 builder.Services.AddScoped<IServerToolHandler, ReadDataToolHandler>();
 builder.Services.AddScoped<IServerToolHandler, AskHelpToolHandler>();
+builder.Services.AddScoped<IServerToolHandler, SearchHelpServerTool>();
 builder.Services.AddScoped<IServerToolHandler, GetHelpPageToolHandler>();
+builder.Services.AddScoped<IServerToolHandler, AgentChartServerTool>();
 builder.Services.AddScoped<AgentKnowledgeService>();
 builder.Services.AddScoped<IServerToolHandler, RememberFactTool>();
 builder.Services.AddScoped<IServerToolHandler, AskKnowledgeTool>();
@@ -194,12 +197,27 @@ builder.Services.AddSingleton<AgentAttachmentService>();
 builder.Services.AddScoped<IServerToolHandler, ListAttachmentsTool>();
 builder.Services.AddScoped<IServerToolHandler, ReadAttachmentTool>();
 builder.Services.AddScoped<IServerToolHandler, AskAttachmentTool>();
-builder.Services.AddHttpClient<IAgentLlmProvider, OpenAiCompatibleAgentProvider>((sp, client) =>
+
+static void ConfigureAgentLlmClient(IServiceProvider sp, HttpClient client)
 {
     var opts = sp.GetRequiredService<IOptions<AgentOptions>>().Value;
     opts.Normalize();
-    client.BaseAddress = new Uri(opts.BaseUrl);
+    var baseUrl = string.Equals(opts.Provider, "Anthropic", StringComparison.OrdinalIgnoreCase)
+                  && string.Equals(opts.BaseUrl.TrimEnd('/'), "https://generativelanguage.googleapis.com/v1beta/openai", StringComparison.OrdinalIgnoreCase)
+        ? "https://api.anthropic.com/v1/"
+        : opts.BaseUrl;
+    client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
+}
+
+builder.Services.AddHttpClient<OpenAiCompatibleAgentProvider>(ConfigureAgentLlmClient);
+builder.Services.AddHttpClient<AnthropicAgentLlmProvider>(ConfigureAgentLlmClient);
+builder.Services.AddScoped<IAgentLlmProvider>(sp =>
+{
+    var opts = sp.GetRequiredService<IOptions<AgentOptions>>().Value;
+    return string.Equals(opts.Provider, "Anthropic", StringComparison.OrdinalIgnoreCase)
+        ? sp.GetRequiredService<AnthropicAgentLlmProvider>()
+        : sp.GetRequiredService<OpenAiCompatibleAgentProvider>();
 });
 builder.Services.AddScoped<AgentService>();
 

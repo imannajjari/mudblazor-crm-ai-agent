@@ -2,19 +2,20 @@
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @attribute [Authorize]
+@inject AppText L
 
 @if (user == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Modify Roles</MudText>
+            <MudText Typo="Typo.h6">@L["ENT_MODIFY_ROLES"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -23,16 +24,16 @@ else
     <EditForm Model="model" OnSubmit="OnSubmit">
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Modify Roles for @user.FirstName @user.LastName</MudText>
+                <MudText Typo="Typo.h6">@L["ROLE_MODIFY_FOR"] @user.FirstName @user.LastName</MudText>
             </TitleContent>
             <DialogContent>
-                <MudSelect T="string" Label="Roles" MultiSelection="true" @bind-SelectedValues="@model.Roles">
-                    <MudSelectItem T="string" Value="@("Administrator")">Administrator</MudSelectItem>
+                <MudSelect T="string" Label="@L["ENT_ROLES"]" MultiSelection="true" @bind-SelectedValues="@model.Roles">
+                    <MudSelectItem T="string" Value="@("Administrator")">@L["ROLE_ADMIN"]</MudSelectItem>
                 </MudSelect>
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

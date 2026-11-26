@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Todo Task</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_TODO_TASK"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -23,17 +24,17 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Todo Task</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_TODO_TASK"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-                <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="Description" />
-                <MudNumericField @bind-Value="record.AssignedTo" For="@(() => record.AssignedTo)" Label="AssignedTo" />
-                <MudTextField @bind-Value="record.Status" For="@(() => record.Status)" Label="Status" />
-                <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.DueDate" For="@(() => record.DueDate)" Label="DueDate" />
-                <MudNumericField @bind-Value="record.UserId" For="@(() => record.UserId)" Label="UserId" />
-                <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.FollowupDate" For="@(() => record.FollowupDate)" Label="FollowupDate" />
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+                <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="@L["FLD_DESCRIPTION"]" />
+                <MudNumericField @bind-Value="record.AssignedTo" For="@(() => record.AssignedTo)" Label="@L["FLD_ASSIGNED_TO"]" />
+                <MudTextField @bind-Value="record.Status" For="@(() => record.Status)" Label="@L["FLD_STATUS"]" />
+                <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.DueDate" For="@(() => record.DueDate)" Label="@L["FLD_DUE_DATE"]" />
+                <MudNumericField @bind-Value="record.UserId" For="@(() => record.UserId)" Label="@L["FLD_USER_ID"]" />
+                <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.FollowupDate" For="@(() => record.FollowupDate)" Label="@L["FLD_FOLLOWUP_DATE"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Icon = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -45,12 +46,12 @@ else
                 {
                     <MudImage Src="@GetAbsoluteUri(record.Icon)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
                 }
-                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
+                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
 
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

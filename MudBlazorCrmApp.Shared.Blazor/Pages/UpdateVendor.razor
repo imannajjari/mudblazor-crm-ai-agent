@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Vendor</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_VENDOR"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -23,14 +24,14 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Vendor</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_VENDOR"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-                <MudTextField @bind-Value="record.ContactName" For="@(() => record.ContactName)" Label="ContactName" />
-                <MudNumericField @bind-Value="record.Phone" For="@(() => record.Phone)" Label="Phone" />
-                <MudTextField @bind-Value="record.Email" For="@(() => record.Email)" Label="Email" />
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+                <MudTextField @bind-Value="record.ContactName" For="@(() => record.ContactName)" Label="@L["ENT_CONTACT"]" />
+                <MudNumericField @bind-Value="record.Phone" For="@(() => record.Phone)" Label="@L["FLD_PHONE"]" />
+                <MudTextField @bind-Value="record.Email" For="@(() => record.Email)" Label="@L["FLD_EMAIL"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Logo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -42,21 +43,21 @@ else
                 {
                     <MudImage Src="@GetAbsoluteUri(record.Logo)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
                 }
-                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
-                <MudSelect @bind-Value="record.AddressId" For="@(() => record.AddressId)" Label="Address" AnchorOrigin="Origin.BottomCenter">
+                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
+                <MudSelect @bind-Value="record.AddressId" For="@(() => record.AddressId)" Label="@L["ENT_ADDRESS"]" AnchorOrigin="Origin.BottomCenter">
                     <MudSelectItem T="long?" Value="null" />
                     @foreach (var address in addressArray ?? Enumerable.Empty<Address>())
                     {
                         <MudSelectItem Value="@address.Id">@address.City</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="long?" Label="Product" MultiSelection="true" @bind-SelectedValues="productValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => productArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Name)))" AnchorOrigin="Origin.BottomCenter">
+                <MudSelect T="long?" Label="@L["ENT_PRODUCT"]" MultiSelection="true" @bind-SelectedValues="productValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => productArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Name)))" AnchorOrigin="Origin.BottomCenter">
                     @foreach (var product in productArray ?? Enumerable.Empty<Product>())
                     {
                         <MudSelectItem T="long?" Value="@product.Id">@product.Name</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="long?" Label="Service" MultiSelection="true" @bind-SelectedValues="serviceValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => serviceArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Name)))" AnchorOrigin="Origin.BottomCenter">
+                <MudSelect T="long?" Label="@L["ENT_SERVICE"]" MultiSelection="true" @bind-SelectedValues="serviceValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => serviceArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Name)))" AnchorOrigin="Origin.BottomCenter">
                     @foreach (var service in serviceArray ?? Enumerable.Empty<Service>())
                     {
                         <MudSelectItem T="long?" Value="@service.Id">@service.Name</MudSelectItem>
@@ -65,8 +66,8 @@ else
 
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

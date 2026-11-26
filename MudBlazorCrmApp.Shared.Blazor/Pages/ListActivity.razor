@@ -1,51 +1,52 @@
-@page "/activity"
+﻿@page "/activity"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject HttpClient HttpClient
 @inject IJSRuntime JSRuntime
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Activities</PageTitle>
+<PageTitle>@L["ENT_ACTIVITIES"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Activities</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_ACTIVITIES"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="Activity" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Activities</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_ACTIVITIES"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
-         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">Export</MudButton>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">@L["ACTION_EXPORT"]</MudButton>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Type" Title="Type" />
-        <PropertyColumn Property="x => x!.Subject" Title="Subject" />
-        <PropertyColumn Property="x => x!.ActivityDate" Title="Date" />
-        <PropertyColumn Property="x => x!.Status" Title="Status" />
-        <PropertyColumn Property="x => x!.Direction" Title="Direction" />
-        <TemplateColumn Title="Customer" Sortable="false" Filterable="false">
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Type" Title="@L["FLD_TYPE"]" />
+        <PropertyColumn Property="x => x!.Subject" Title="@L["FLD_SUBJECT"]" />
+        <PropertyColumn Property="x => x!.ActivityDate" Title="@L["FLD_DATE"]" />
+        <PropertyColumn Property="x => x!.Status" Title="@L["FLD_STATUS"]" />
+        <PropertyColumn Property="x => x!.Direction" Title="@L["FLD_DIRECTION"]" />
+        <TemplateColumn Title="@L["ENT_CUSTOMER"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @(context.Item?.Customer?.Name)
             </CellTemplate>
         </TemplateColumn>
-        <TemplateColumn Title="Contact" Sortable="false" Filterable="false">
+        <TemplateColumn Title="@L["ENT_CONTACT"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 @(context.Item?.Contact?.Name)
             </CellTemplate>
         </TemplateColumn>
-        <PropertyColumn Property="x => x!.DurationMinutes" Title="Duration (min)" />
+        <PropertyColumn Property="x => x!.DurationMinutes" Title="@L["FLD_DURATION_MIN"]" />
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -107,7 +108,7 @@
     private async void OnAdd()
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
-        var dialogRef = await DialogService.ShowAsync<AddActivity>("Add Activity", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddActivity>(L["ADD_ACTIVITY"], dialogOptions);
         var result = await dialogRef.Result;
         if (result is { Canceled: false })
         {
@@ -119,7 +120,7 @@
     {
         DialogParameters<UpdateActivity> dialogParams = new() { { x => x.Id, record.Id!.Value } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
-        var dialogRef = await DialogService.ShowAsync<UpdateActivity>("Update Activity", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateActivity>(L["UPD_ACTIVITY"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
         if (result is { Canceled: false })
         {
@@ -129,7 +130,7 @@
 
     private async void OnDelete(Activity record)
     {
-        var result = await DialogService.ShowMessageBoxAsync("Warning", "Are you sure you want to delete this record?", "Delete", "Cancel");
+        var result = await DialogService.ShowMessageBoxAsync(L["UI_WARNING"], L["UI_DELETE_CONFIRM"], L["ACTION_DELETE"], L["ACTION_CANCEL"]);
         if (result.GetValueOrDefault(false))
         {
             try

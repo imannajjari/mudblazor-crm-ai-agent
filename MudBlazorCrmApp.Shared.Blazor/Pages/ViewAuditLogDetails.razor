@@ -1,5 +1,6 @@
 @using MudBlazor
 @inject ISnackbar Snackbar
+@inject AppText L
 
 <MudDialog>
     <TitleContent>
@@ -13,41 +14,41 @@
         {
             <MudGrid>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="ID" Variant="Variant.Outlined">@AuditLogRecord.Id</MudField>
+                    <MudField Label="@L["FLD_ID"]" Variant="Variant.Outlined">@AuditLogRecord.Id</MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="Timestamp" Variant="Variant.Outlined">@AuditLogRecord.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</MudField>
+                    <MudField Label="@L["FLD_TIMESTAMP"]" Variant="Variant.Outlined">@AuditLogRecord.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="User ID" Variant="Variant.Outlined">@(AuditLogRecord.UserId ?? "N/A")</MudField>
+                    <MudField Label="@L["FLD_USER_ID"]" Variant="Variant.Outlined">@(AuditLogRecord.UserId ?? "N/A")</MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="User Name" Variant="Variant.Outlined">@(AuditLogRecord.UserName ?? "N/A")</MudField>
+                    <MudField Label="@L["FLD_USER_NAME"]" Variant="Variant.Outlined">@(AuditLogRecord.UserName ?? "N/A")</MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="Entity Type" Variant="Variant.Outlined">@AuditLogRecord.EntityType</MudField>
+                    <MudField Label="@L["FLD_ENTITY_TYPE"]" Variant="Variant.Outlined">@AuditLogRecord.EntityType</MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="Entity ID" Variant="Variant.Outlined">@AuditLogRecord.EntityId</MudField>
+                    <MudField Label="@L["FLD_ENTITY_ID"]" Variant="Variant.Outlined">@AuditLogRecord.EntityId</MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="Change Type" Variant="Variant.Outlined">
+                    <MudField Label="@L["FLD_CHANGE_TYPE"]" Variant="Variant.Outlined">
                         <MudChip T="string" Size="Size.Small" Color="@GetChangeTypeColor(AuditLogRecord.ChangeType)">
                             @AuditLogRecord.ChangeType
                         </MudChip>
                     </MudField>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudField Label="Table Name" Variant="Variant.Outlined">@(AuditLogRecord.TableName ?? "N/A")</MudField>
+                    <MudField Label="@L["FLD_TABLE_NAME"]" Variant="Variant.Outlined">@(AuditLogRecord.TableName ?? "N/A")</MudField>
                 </MudItem>
                 <MudItem xs="12">
-                    <MudField Label="Correlation ID" Variant="Variant.Outlined">@(AuditLogRecord.CorrelationId ?? "N/A")</MudField>
+                    <MudField Label="@L["FLD_CORRELATION_ID"]" Variant="Variant.Outlined">@(AuditLogRecord.CorrelationId ?? "N/A")</MudField>
                 </MudItem>
                 
                 @if (!string.IsNullOrEmpty(AuditLogRecord.ChangedProperties))
                 {
                     <MudItem xs="12">
-                        <MudText Typo="Typo.subtitle1" Class="mb-2">Changed Properties</MudText>
+                        <MudText Typo="Typo.subtitle1" Class="mb-2">@L["FLD_CHANGED_PROPS"]</MudText>
                         <MudPaper Class="pa-3" Elevation="0" Outlined="true">
                             <MudText Style="font-family: monospace; white-space: pre-wrap; word-break: break-all;">@FormatJson(AuditLogRecord.ChangedProperties)</MudText>
                         </MudPaper>
@@ -83,28 +84,28 @@
                 @if (!string.IsNullOrEmpty(AuditLogRecord.IpAddress))
                 {
                     <MudItem xs="12" sm="6">
-                        <MudField Label="IP Address" Variant="Variant.Outlined">@AuditLogRecord.IpAddress</MudField>
+                        <MudField Label="@L["FLD_IP_ADDRESS"]" Variant="Variant.Outlined">@AuditLogRecord.IpAddress</MudField>
                     </MudItem>
                 }
 
                 @if (!string.IsNullOrEmpty(AuditLogRecord.UserAgent))
                 {
                     <MudItem xs="12">
-                        <MudField Label="User Agent" Variant="Variant.Outlined">@AuditLogRecord.UserAgent</MudField>
+                        <MudField Label="@L["FLD_USER_AGENT"]" Variant="Variant.Outlined">@AuditLogRecord.UserAgent</MudField>
                     </MudItem>
                 }
 
                 @if (!string.IsNullOrEmpty(AuditLogRecord.AdditionalInfo))
                 {
                     <MudItem xs="12">
-                        <MudField Label="Additional Info" Variant="Variant.Outlined">@AuditLogRecord.AdditionalInfo</MudField>
+                        <MudField Label="@L["FLD_ADDITIONAL_INFO"]" Variant="Variant.Outlined">@AuditLogRecord.AdditionalInfo</MudField>
                     </MudItem>
                 }
             </MudGrid>
         }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Close">Close</MudButton>
+        <MudButton OnClick="Close">@L["UI_CLOSE"]</MudButton>
     </DialogActions>
 </MudDialog>
 

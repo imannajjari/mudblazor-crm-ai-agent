@@ -2,35 +2,34 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Import Data</PageTitle>
+<PageTitle>@L["NAV_IMPORT_DATA"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Import Data</MudText>
+    <MudText Typo="Typo.h3">@L["NAV_IMPORT_DATA"]</MudText>
 </div>
 
 <MudPaper Class="pa-6" Elevation="3">
     <MudGrid>
         <MudItem xs="12" md="6">
-            <MudSelect T="string" @bind-Value="selectedEntity" Label="Entity Type" AnchorOrigin="Origin.BottomCenter">
-                <MudSelectItem Value="@("contacts")">Contacts</MudSelectItem>
-                <MudSelectItem Value="@("customers")">Customers</MudSelectItem>
-                <MudSelectItem Value="@("leads")">Leads</MudSelectItem>
-                <MudSelectItem Value="@("opportunities")">Opportunities</MudSelectItem>
-                <MudSelectItem Value="@("sales")">Sales</MudSelectItem>
+            <MudSelect T="string" @bind-Value="selectedEntity" Label="@L["FLD_ENTITY_TYPE"]" AnchorOrigin="Origin.BottomCenter">
+                <MudSelectItem Value="@("contacts")">@L["ENT_CONTACTS"]</MudSelectItem>
+                <MudSelectItem Value="@("customers")">@L["ENT_CUSTOMERS"]</MudSelectItem>
+                <MudSelectItem Value="@("leads")">@L["ENT_LEADS"]</MudSelectItem>
+                <MudSelectItem Value="@("opportunities")">@L["ENT_OPPORTUNITIES"]</MudSelectItem>
+                <MudSelectItem Value="@("sales")">@L["ENT_SALES"]</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="12" md="6">
             <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".csv">
                 <ActivatorContent>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">
-                        Select CSV File
-                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">@L["UI_SELECT_CSV"]</MudButton>
                 </ActivatorContent>
             </MudFileUpload>
             @if (selectedFile != null)
             {
-                <MudText Typo="Typo.body2" Class="mt-2">Selected: @selectedFile.Name (@(selectedFile.Size / 1024) KB)</MudText>
+                <MudText Typo="Typo.body2" Class="mt-2">@L["IMP_SELECTED"]: @selectedFile.Name (@(selectedFile.Size / 1024) KB)</MudText>
             }
         </MudItem>
         <MudItem xs="12">
@@ -38,11 +37,11 @@
                 @if (isImporting)
                 {
                     <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                    <span>Importing...</span>
+                    <span>@L["IMP_IMPORTING"]</span>
                 }
                 else
                 {
-                    <span>Import</span>
+                    <span>@L["IMP_IMPORT_BTN"]</span>
                 }
             </MudButton>
         </MudItem>
@@ -51,26 +50,26 @@
     @if (importResult != null)
     {
         <MudAlert Severity="Severity.Success" Class="mt-4">
-            Successfully imported @importResult.Imported of @importResult.Total records.
+            @string.Format(L["IMP_SUCCESS"], importResult.Imported, importResult.Total)
         </MudAlert>
     }
 
     <MudDivider Class="my-4" />
-    <MudText Typo="Typo.h6">CSV Format Guide</MudText>
+    <MudText Typo="Typo.h6">@L["IMP_CSV_GUIDE"]</MudText>
     <MudText Typo="Typo.body2" Class="mt-2">
-        <b>Contacts:</b> Name, Email, Phone, Role, Notes
+        <b>@L["ENT_CONTACTS"]:</b> Name, Email, Phone, Role, Notes
     </MudText>
     <MudText Typo="Typo.body2">
-        <b>Customers:</b> Name, Type, Industry, Notes
+        <b>@L["ENT_CUSTOMERS"]:</b> Name, Type, Industry, Notes
     </MudText>
     <MudText Typo="Typo.body2">
-        <b>Leads:</b> Source, Status, PotentialValue, Notes
+        <b>@L["ENT_LEADS"]:</b> Source, Status, PotentialValue, Notes
     </MudText>
     <MudText Typo="Typo.body2">
-        <b>Opportunities:</b> Name, Stage, Value, Probability, Source, Notes
+        <b>@L["ENT_OPPORTUNITIES"]:</b> Name, Stage, Value, Probability, Source, Notes
     </MudText>
     <MudText Typo="Typo.body2">
-        <b>Sales:</b> Quantity, UnitPrice, TotalAmount, SaleDate, Notes
+        <b>@L["ENT_SALES"]:</b> Quantity, UnitPrice, TotalAmount, SaleDate, Notes
     </MudText>
 </MudPaper>
 

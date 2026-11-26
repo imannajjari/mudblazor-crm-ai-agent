@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Service</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_SERVICE"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -23,13 +24,13 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Service</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_SERVICE"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-                <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="Description" />
-                <MudTextField @bind-Value="record.Recurring" For="@(() => record.Recurring)" Label="Recurring" />
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+                <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="@L["FLD_DESCRIPTION"]" />
+                <MudTextField @bind-Value="record.Recurring" For="@(() => record.Recurring)" Label="@L["FLD_RECURRING"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Icon = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -41,8 +42,8 @@ else
                 {
                     <MudImage Src="@GetAbsoluteUri(record.Icon)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
                 }
-                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
-                <MudSelect T="long?" Label="ServiceCategory" MultiSelection="true" @bind-SelectedValues="serviceCategoryValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => serviceCategoryArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Name)))" AnchorOrigin="Origin.BottomCenter">
+                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
+                <MudSelect T="long?" Label="@L["ENT_SERVICE_CATEGORY"]" MultiSelection="true" @bind-SelectedValues="serviceCategoryValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => serviceCategoryArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Name)))" AnchorOrigin="Origin.BottomCenter">
                     @foreach (var serviceCategory in serviceCategoryArray ?? Enumerable.Empty<ServiceCategory>())
                     {
                         <MudSelectItem T="long?" Value="@serviceCategory.Id">@serviceCategory.Name</MudSelectItem>
@@ -51,8 +52,8 @@ else
 
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

@@ -2,11 +2,12 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
+@inject AppText L
 
-<PageTitle>Login</PageTitle>
+<PageTitle>@L["NAV_LOGIN"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Login</MudText>
+    <MudText Typo="Typo.h3">@L["NAV_LOGIN"]</MudText>
 </div>
 
 <MudContainer MaxWidth="MaxWidth.Small">
@@ -14,11 +15,11 @@
         <DataAnnotationsValidator />
         <MudCard>
             <MudCardContent>
-                <MudTextField @bind-Value="loginModel.Email" For="@(() => loginModel.Email)" Label="Email" />
-                <MudTextField @bind-Value="loginModel.Password" For="@(() => loginModel.Password)" Label="Password" InputType="InputType.Password" />
+                <MudTextField @bind-Value="loginModel.Email" For="@(() => loginModel.Email)" Label="@L["FLD_EMAIL"]" />
+                <MudTextField @bind-Value="loginModel.Password" For="@(() => loginModel.Password)" Label="@L["FLD_PASSWORD"]" InputType="InputType.Password" />
             </MudCardContent>
             <MudCardActions>
-                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="ml-auto">Login</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="ml-auto">@L["NAV_LOGIN"]</MudButton>
             </MudCardActions>
         </MudCard>
     </EditForm>

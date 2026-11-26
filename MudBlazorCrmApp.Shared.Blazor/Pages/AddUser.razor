@@ -2,21 +2,22 @@
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @attribute [Authorize]
+@inject AppText L
 
 <EditForm Model="@registerModel" OnValidSubmit="@OnSubmit">
     <DataAnnotationsValidator />
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Add User</MudText>
+            <MudText Typo="Typo.h6">@L["ADD_USER"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="registerModel.Email" For="@(() => registerModel.Email)" Label="Email" />
-            <MudTextField @bind-Value="registerModel.Password" For="@(() => registerModel.Password)" Label="Password" InputType="InputType.Password" />
-            <MudTextField @bind-Value="registerModel.ConfirmPassword" For="@(() => registerModel.ConfirmPassword)" Label="Confirm Password" InputType="InputType.Password" />
-            <MudTextField @bind-Value="registerModel.FirstName" For="@(() => registerModel.FirstName)" Label="First Name" />
-            <MudTextField @bind-Value="registerModel.LastName" For="@(() => registerModel.LastName)" Label="Last Name" />
-            <MudTextField @bind-Value="registerModel.Title" For="@(() => registerModel.Title)" Label="Title" />
-            <MudTextField @bind-Value="registerModel.CompanyName" For="@(() => registerModel.CompanyName)" Label="Company Name" />
+            <MudTextField @bind-Value="registerModel.Email" For="@(() => registerModel.Email)" Label="@L["FLD_EMAIL"]" />
+            <MudTextField @bind-Value="registerModel.Password" For="@(() => registerModel.Password)" Label="@L["FLD_PASSWORD"]" InputType="InputType.Password" />
+            <MudTextField @bind-Value="registerModel.ConfirmPassword" For="@(() => registerModel.ConfirmPassword)" Label="@L["FLD_CONFIRM_PASSWORD"]" InputType="InputType.Password" />
+            <MudTextField @bind-Value="registerModel.FirstName" For="@(() => registerModel.FirstName)" Label="@L["FLD_FIRST_NAME"]" />
+            <MudTextField @bind-Value="registerModel.LastName" For="@(() => registerModel.LastName)" Label="@L["FLD_LAST_NAME"]" />
+            <MudTextField @bind-Value="registerModel.Title" For="@(() => registerModel.Title)" Label="@L["FLD_TITLE"]" />
+            <MudTextField @bind-Value="registerModel.CompanyName" For="@(() => registerModel.CompanyName)" Label="@L["FLD_COMPANY_NAME"]" />
             <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => registerModel.Photo = await UploadImageAsync(args))" Accept=".png,.jpg,.jpeg">
                 <ActivatorContent>
                     <MudIconButton Color="Color.Info"
@@ -30,8 +31,8 @@
             }
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Add</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["ACTION_ADD"]</MudButton>
         </DialogActions>
     </MudDialog>
 </EditForm>

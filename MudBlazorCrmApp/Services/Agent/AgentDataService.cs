@@ -36,11 +36,23 @@ public sealed class AgentDataService(
         ["sales"] = new("sales", "Sale", true, "InvoiceNumber", "Completed sales records with count, InvoiceNumber, PaymentStatus, SaleDate, TotalAmount."),
         ["support_cases"] = new("support_cases", "SupportCase", true, "Title", "Support cases / tickets with count, Title, Status, Priority."),
         ["activities"] = new("activities", "Activity", true, "Subject", "Activities (calls, emails, meetings, notes) with count, Subject, Type, Status."),
-        ["todo_tasks"] = new("todo_tasks", "TodoTask", true, "Name", "Tasks list with count, Name, Description, Status, DueDate.")
+        ["todo_tasks"] = new("todo_tasks", "TodoTask", true, "Name", "Tasks list with count, Name, Description, Status, DueDate."),
+        ["addresses"] = new("addresses", "Address", true, "Street", "Addresses list with count, Street, City, State, ZipCode, Country."),
+        ["products"] = new("products", "Product", true, "Name", "Products catalog with count, Name, Price, StockQuantity, Description."),
+        ["product_categories"] = new("product_categories", "ProductCategory", true, "Name", "Product categories with count, Name."),
+        ["services"] = new("services", "Service", true, "Name", "Services catalog with count, Name, Recurring, Description."),
+        ["service_categories"] = new("service_categories", "ServiceCategory", true, "Name", "Service categories with count, Name."),
+        ["vendors"] = new("vendors", "Vendor", true, "Name", "Vendors / suppliers list with count, Name, ContactName, Phone, Email."),
+        ["rewards"] = new("rewards", "Reward", true, null, "Contact rewards ledger with count, Rewardpoints, CreditsDollars, ConversionRate, ExpirationDate."),
+        ["tags"] = new("tags", "Tag", true, "Name", "Tags list with count, Name, Color."),
+        ["communications"] = new("communications", "Communication", true, "Subject", "Communications log with count, Subject, Type, Direction, Status, Outcome, FollowUpRequired.")
     };
 
     public static string GetCatalogDescription() =>
         string.Join("\n", Sources.Values.Select(s => $"- `{s.Name}`: {s.Description}"));
+
+    public static string GetSourceEnumJson() =>
+        JsonSerializer.Serialize(Sources.Keys.ToArray());
 
     public async Task<string> ReadAsync(JsonElement args, CancellationToken ct)
     {

@@ -1,29 +1,30 @@
-@page "/tag"
+﻿@page "/tag"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Tags</PageTitle>
+<PageTitle>@L["ENT_TAGS"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Tags</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_TAGS"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="Tag" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Tags</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_TAGS"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Name" Title="Name" />
-        <TemplateColumn Title="Color" Sortable="false" Filterable="false">
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Name" Title="@L["FLD_NAME"]" />
+        <TemplateColumn Title="@L["FLD_COLOR"]" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudChip T="string" Style="@($"background-color:{context.Item!.Color ?? "#594AE2"};color:white")">@context.Item!.Color</MudChip>
             </CellTemplate>
@@ -31,8 +32,8 @@
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -73,7 +74,7 @@
     private async void OnAdd()
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
-        var dialogRef = await DialogService.ShowAsync<AddTag>("Add Tag", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddTag>(L["ADD_TAG"], dialogOptions);
         var result = await dialogRef.Result;
         if (result is { Canceled: false }) await (grid?.ReloadServerData() ?? Task.CompletedTask);
     }
@@ -82,14 +83,14 @@
     {
         DialogParameters<UpdateTag> dialogParams = new() { { x => x.Id, record.Id!.Value } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
-        var dialogRef = await DialogService.ShowAsync<UpdateTag>("Update Tag", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateTag>(L["UPD_TAG"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
         if (result is { Canceled: false }) await (grid?.ReloadServerData() ?? Task.CompletedTask);
     }
 
     private async void OnDelete(Tag record)
     {
-        var result = await DialogService.ShowMessageBoxAsync("Warning", "Are you sure you want to delete this tag?", "Delete", "Cancel");
+        var result = await DialogService.ShowMessageBoxAsync(L["UI_WARNING"], "Are you sure you want to delete this tag?", L["ACTION_DELETE"], L["ACTION_CANCEL"]);
         if (result.GetValueOrDefault(false))
         {
             try

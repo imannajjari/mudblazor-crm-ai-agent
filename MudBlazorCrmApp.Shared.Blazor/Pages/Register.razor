@@ -2,11 +2,12 @@
 @inject AppService AppService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
+@inject AppText L
 
-<PageTitle>Register</PageTitle>
+<PageTitle>@L["NAV_REGISTER"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Register</MudText>
+    <MudText Typo="Typo.h3">@L["NAV_REGISTER"]</MudText>
 </div>
 
 <MudContainer MaxWidth="MaxWidth.Small">
@@ -14,16 +15,16 @@
         <DataAnnotationsValidator />
         <MudCard>
             <MudCardContent>
-                <MudTextField @bind-Value="registerModel.Email" For="@(() => registerModel.Email)" Label="Email" />
-                <MudTextField @bind-Value="registerModel.Password" For="@(() => registerModel.Password)" Label="Password" InputType="InputType.Password" />
-                <MudTextField @bind-Value="registerModel.ConfirmPassword" For="@(() => registerModel.ConfirmPassword)" Label="Confirm Password" InputType="InputType.Password" />
-                <MudTextField @bind-Value="registerModel.FirstName" For="@(() => registerModel.FirstName)" Label="First Name" />
-                <MudTextField @bind-Value="registerModel.LastName" For="@(() => registerModel.LastName)" Label="Last Name" />
-                <MudTextField @bind-Value="registerModel.Title" For="@(() => registerModel.Title)" Label="Title" />
-                <MudTextField @bind-Value="registerModel.CompanyName" For="@(() => registerModel.CompanyName)" Label="Company Name" />
+                <MudTextField @bind-Value="registerModel.Email" For="@(() => registerModel.Email)" Label="@L["FLD_EMAIL"]" />
+                <MudTextField @bind-Value="registerModel.Password" For="@(() => registerModel.Password)" Label="@L["FLD_PASSWORD"]" InputType="InputType.Password" />
+                <MudTextField @bind-Value="registerModel.ConfirmPassword" For="@(() => registerModel.ConfirmPassword)" Label="@L["FLD_CONFIRM_PASSWORD"]" InputType="InputType.Password" />
+                <MudTextField @bind-Value="registerModel.FirstName" For="@(() => registerModel.FirstName)" Label="@L["FLD_FIRST_NAME"]" />
+                <MudTextField @bind-Value="registerModel.LastName" For="@(() => registerModel.LastName)" Label="@L["FLD_LAST_NAME"]" />
+                <MudTextField @bind-Value="registerModel.Title" For="@(() => registerModel.Title)" Label="@L["FLD_TITLE"]" />
+                <MudTextField @bind-Value="registerModel.CompanyName" For="@(() => registerModel.CompanyName)" Label="@L["FLD_COMPANY_NAME"]" />
             </MudCardContent>
             <MudCardActions>
-                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="ml-auto">Register</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="ml-auto">@L["NAV_REGISTER"]</MudButton>
             </MudCardActions>
         </MudCard>
     </EditForm>

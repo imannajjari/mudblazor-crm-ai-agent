@@ -2,19 +2,20 @@
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @attribute [Authorize]
+@inject AppText L
 
 @if (user == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update User</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_USER"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -24,16 +25,16 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update User</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_USER"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="user.Id" For="@(() => user.Id)" Label="User Id" ReadOnly="true" HideSpinButtons="true" />
-                <MudTextField @bind-Value="user.Email" For="@(() => user.Email)" Label="User Name" ReadOnly="true" />
-                <MudTextField @bind-Value="user.PhoneNumber" For="@(() => user.PhoneNumber)" Label="Phone Number" ReadOnly="true" />
-                <MudTextField @bind-Value="updateUser.FirstName" For="@(() => updateUser.FirstName)" Label="First Name" />
-                <MudTextField @bind-Value="updateUser.LastName" For="@(() => updateUser.LastName)" Label="Last Name" />
-                <MudTextField @bind-Value="updateUser.Title" For="@(() => updateUser.Title)" Label="Title" />
-                <MudTextField @bind-Value="updateUser.CompanyName" For="@(() => updateUser.CompanyName)" Label="Company Name" />
+                <MudNumericField @bind-Value="user.Id" For="@(() => user.Id)" Label="@L["FLD_USER_ID"]" ReadOnly="true" HideSpinButtons="true" />
+                <MudTextField @bind-Value="user.Email" For="@(() => user.Email)" Label="@L["FLD_USER_NAME"]" ReadOnly="true" />
+                <MudTextField @bind-Value="user.PhoneNumber" For="@(() => user.PhoneNumber)" Label="@L["FLD_PHONE_NUMBER"]" ReadOnly="true" />
+                <MudTextField @bind-Value="updateUser.FirstName" For="@(() => updateUser.FirstName)" Label="@L["FLD_FIRST_NAME"]" />
+                <MudTextField @bind-Value="updateUser.LastName" For="@(() => updateUser.LastName)" Label="@L["FLD_LAST_NAME"]" />
+                <MudTextField @bind-Value="updateUser.Title" For="@(() => updateUser.Title)" Label="@L["FLD_TITLE"]" />
+                <MudTextField @bind-Value="updateUser.CompanyName" For="@(() => updateUser.CompanyName)" Label="@L["FLD_COMPANY_NAME"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => updateUser.Photo = await UploadImageAsync(args))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -47,8 +48,8 @@ else
                 }
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

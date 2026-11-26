@@ -5,7 +5,17 @@ using Microsoft.Extensions.Logging;
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
 public sealed record AgentChatSummaryDto(string ChatKey, string Title, DateTime UpdatedDate);
-public sealed record AgentChatDetailDto(string? ChatKey, string? Title, string? HistoryJson, string? LogJson, DateTime? UpdatedDate, int TaskCount);
+public sealed record AgentChatDetailDto(
+    string? ChatKey,
+    string? Title,
+    string? HistoryJson,
+    string? LogJson,
+    DateTime? UpdatedDate,
+    int TaskCount,
+    int TotalInputTokens = 0,
+    int TotalOutputTokens = 0,
+    decimal TotalCost = 0m,
+    int TotalCalls = 0);
 public sealed record AgentChatListDto(List<AgentChatSummaryDto>? Chats);
 
 public sealed class AgentChatStoreClient(

@@ -1,42 +1,43 @@
-@page "/reward"
+﻿@page "/reward"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject HttpClient HttpClient
 @inject IJSRuntime JSRuntime
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Contact Rewards</PageTitle>
+<PageTitle>@L["ENT_CONTACT_REWARDS"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Contact Rewards</MudText>
+    <MudText Typo="Typo.h3">@L["ENT_CONTACT_REWARDS"]</MudText>
 </div>
 
 <MudStack AlignItems="AlignItems.End" Class="mb-3">
-    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">Add</MudButton>
+    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" OnClick="@(e => OnAdd())">@L["ACTION_ADD"]</MudButton>
 </MudStack>
 
 <MudDataGrid T="Reward" @ref="grid" ServerData="@ServerReload" Filterable="true">
     <ToolBarContent>
-         <MudText Typo="Typo.h6">Reward</MudText>
+         <MudText Typo="Typo.h6">@L["ENT_REWARD"]</MudText>
          <MudSpacer />
-         <MudTextField T="string" Placeholder="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
-         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">Export</MudButton>
+         <MudTextField T="string" Placeholder="@L["ACTION_SEARCH"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" Immediate="true" ValueChanged="@(value => SearchChanged(value))"></MudTextField>
+         <MudButton Color="Color.Primary" OnClick="ExportAllToCSV">@L["ACTION_EXPORT"]</MudButton>
     </ToolBarContent>
     <Columns>
-        <PropertyColumn Property="x => x!.Id" Title="Id" />
-        <PropertyColumn Property="x => x!.Rewardpoints" Title="Rewardpoints" />
-        <PropertyColumn Property="x => x!.CreditsDollars" Title="CreditsDollars" />
-        <PropertyColumn Property="x => x!.ConversionRate" Title="ConversionRate" />
-        <PropertyColumn Property="x => x!.ExpirationDate" Title="ExpirationDate" />
-        <PropertyColumn Property="x => x!.Notes" Title="Notes" />
-        <PropertyColumn Property="x => x!.CreatedDate" Title="Created Date" />
-        <PropertyColumn Property="x => x!.ModifiedDate" Title="Modified Date" />
+        <PropertyColumn Property="x => x!.Id" Title="@L["FLD_ID"]" />
+        <PropertyColumn Property="x => x!.Rewardpoints" Title="@L["FLD_REWARD_POINTS"]" />
+        <PropertyColumn Property="x => x!.CreditsDollars" Title="@L["FLD_CREDITS_DOLLARS"]" />
+        <PropertyColumn Property="x => x!.ConversionRate" Title="@L["RPT_CONVERSION_RATE"]" />
+        <PropertyColumn Property="x => x!.ExpirationDate" Title="@L["FLD_EXPIRATION_DATE"]" />
+        <PropertyColumn Property="x => x!.Notes" Title="@L["FLD_NOTES"]" />
+        <PropertyColumn Property="x => x!.CreatedDate" Title="@L["FLD_CREATED_DATE"]" />
+        <PropertyColumn Property="x => x!.ModifiedDate" Title="@L["FLD_MODIFIED_DATE"]" />
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="Edit" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="Delete" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -131,7 +132,7 @@
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<AddReward>("Add Contact Rewards", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddReward>(L["ADD_CONTACT_REWARDS"], dialogOptions);
         var result = await dialogRef.Result;
 
         if (result is { Canceled: false })
@@ -145,7 +146,7 @@
         DialogParameters<UpdateReward> dialogParams = new() { { x => x.Id, record.Id!.Value } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
 
-        var dialogRef = await DialogService.ShowAsync<UpdateReward>("Update Contact Rewards", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateReward>(L["UPD_CONTACT_REWARDS"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
 
         if (result is { Canceled: false })
@@ -157,10 +158,10 @@
     private async void OnDelete(Reward record)
     {
         var result = await DialogService.ShowMessageBoxAsync(
-            "Warning",
-            "Are you sure you want to delete this record?",
-            "Delete",
-            "Cancel");
+            L["UI_WARNING"],
+            L["UI_DELETE_CONFIRM"],
+            L["ACTION_DELETE"],
+            L["ACTION_CANCEL"]);
 
         if (result.GetValueOrDefault(false))
         {

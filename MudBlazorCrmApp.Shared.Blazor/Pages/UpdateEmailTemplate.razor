@@ -1,18 +1,19 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Email Template</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_EMAIL_TEMPLATE"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -22,12 +23,12 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Email Template</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_EMAIL_TEMPLATE"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Template Name" Required="true" />
-                <MudSelect @bind-Value="record.Category" Label="Category" For="@(() => record.Category)">
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_TEMPLATE_NAME"]" Required="true" />
+                <MudSelect @bind-Value="record.Category" Label="@L["FLD_CATEGORY"]" For="@(() => record.Category)">
                     <MudSelectItem Value="@("Onboarding")">Onboarding</MudSelectItem>
                     <MudSelectItem Value="@("Sales")">Sales</MudSelectItem>
                     <MudSelectItem Value="@("Support")">Support</MudSelectItem>
@@ -36,18 +37,18 @@ else
                     <MudSelectItem Value="@("Marketing")">Marketing</MudSelectItem>
                     <MudSelectItem Value="@("Billing")">Billing</MudSelectItem>
                 </MudSelect>
-                <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="Description" />
-                <MudTextField @bind-Value="record.Subject" For="@(() => record.Subject)" Label="Subject Line" Required="true" />
-                <MudTextField @bind-Value="record.Body" For="@(() => record.Body)" Label="Body (Plain Text)" Lines="10" />
-                <MudTextField @bind-Value="record.HtmlBody" For="@(() => record.HtmlBody)" Label="Body (HTML)" Lines="10" HelperText="Optional HTML version" />
-                <MudCheckBox @bind-Value="record.IsActive" Label="Active" />
+                <MudTextField @bind-Value="record.Description" For="@(() => record.Description)" Label="@L["FLD_DESCRIPTION"]" />
+                <MudTextField @bind-Value="record.Subject" For="@(() => record.Subject)" Label="@L["FLD_SUBJECT_LINE"]" Required="true" />
+                <MudTextField @bind-Value="record.Body" For="@(() => record.Body)" Label="@L["FLD_BODY_TEXT"]" Lines="10" />
+                <MudTextField @bind-Value="record.HtmlBody" For="@(() => record.HtmlBody)" Label="@L["FLD_BODY_HTML"]" Lines="10" HelperText="Optional HTML version" />
+                <MudCheckBox @bind-Value="record.IsActive" Label="@L["FLD_ACTIVE"]" />
                 <MudText Typo="Typo.caption" Class="mt-2">
                     Available placeholders: @("{{ContactName}}, {{CustomerName}}, {{CompanyName}}, {{SenderName}}, {{OpportunityName}}, {{Value}}, {{CaseId}}, {{CaseSubject}}")
                 </MudText>
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

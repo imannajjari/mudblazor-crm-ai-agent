@@ -72,8 +72,26 @@ public partial class AgentChatController(
         if (chat == null)
             return Ok(new AgentChatDetailDto(null, null, null, null, null, 0));
 
-        var taskCount = await db.AgentTask.CountAsync(t => t.UserId == userId && t.ChatKey == chatKey, ct);
-        return Ok(new AgentChatDetailDto(chat.ChatKey, chat.Title, chat.HistoryJson, chat.LogJson, chat.UpdatedDate, taskCount));
+        var taskStats = await db.AgentTask
+            .Where(t => t.UserId == userId && t.ChatKey == chatKey)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Count = g.Count(),
+                In = g.Sum(t => t.InputTokens),
+                Out = g.Sum(t => t.OutputTokens),
+                Cost = g.Sum(t => t.Cost),
+                Calls = g.Sum(t => t.ModelCalls)
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return Ok(new AgentChatDetailDto(
+            chat.ChatKey, chat.Title, chat.HistoryJson, chat.LogJson, chat.UpdatedDate,
+            taskStats?.Count ?? 0,
+            taskStats?.In ?? 0,
+            taskStats?.Out ?? 0,
+            taskStats?.Cost ?? 0m,
+            taskStats?.Calls ?? 0));
     }
 
     [HttpPut("{chatKey}")]
@@ -119,7 +137,35 @@ public partial class AgentChatController(
         }
 
         await db.SaveChangesAsync(ct);
+        await PruneOldChatsIfConfiguredAsync(userId, ct);
         return Ok(new AgentChatSaveResponse(null));
+    }
+
+    private async Task PruneOldChatsIfConfiguredAsync(string userId, CancellationToken ct)
+    {
+        var opts = optionsAccessor.Value;
+        opts.Normalize();
+        if (opts.HistoryDays <= 0) return;
+
+        var cutoff = DateTime.UtcNow.AddDays(-opts.HistoryDays);
+        var expiredKeys = await db.AgentChat
+            .Where(c => c.UserId == userId && c.UpdatedDate < cutoff)
+            .Select(c => c.ChatKey)
+            .Take(25)
+            .ToListAsync(ct);
+        if (expiredKeys.Count == 0) return;
+
+        var oldTasks = await db.AgentTask
+            .Where(t => t.UserId == userId && expiredKeys.Contains(t.ChatKey))
+            .ToListAsync(ct);
+        if (oldTasks.Count > 0) db.AgentTask.RemoveRange(oldTasks);
+
+        var oldChats = await db.AgentChat
+            .Where(c => c.UserId == userId && expiredKeys.Contains(c.ChatKey))
+            .ToListAsync(ct);
+        if (oldChats.Count > 0) db.AgentChat.RemoveRange(oldChats);
+        await db.SaveChangesAsync(ct);
+        foreach (var key in expiredKeys) attachmentService.DeleteChat(key, userId);
     }
 
     [HttpPut("{chatKey}/tasks/{taskSeq:int}")]
@@ -205,7 +251,17 @@ public partial class AgentChatController(
 
     public sealed record AgentChatSummaryDto(string ChatKey, string Title, DateTime UpdatedDate);
     public sealed record AgentChatListResponse(List<AgentChatSummaryDto> Chats);
-    public sealed record AgentChatDetailDto(string? ChatKey, string? Title, string? HistoryJson, string? LogJson, DateTime? UpdatedDate, int TaskCount);
+    public sealed record AgentChatDetailDto(
+        string? ChatKey,
+        string? Title,
+        string? HistoryJson,
+        string? LogJson,
+        DateTime? UpdatedDate,
+        int TaskCount,
+        int TotalInputTokens = 0,
+        int TotalOutputTokens = 0,
+        decimal TotalCost = 0m,
+        int TotalCalls = 0);
     public sealed record AgentChatSaveRequest(string? Title, string? HistoryJson, string? LogJson);
     public sealed record AgentChatTaskSaveRequest(string? Goal, string? Summary, string? TranscriptJson, int InputTokens, int OutputTokens, int CachedInputTokens, decimal Cost, int ModelCalls, int DurationMs);
     public sealed record AgentChatSaveResponse(string? Error);

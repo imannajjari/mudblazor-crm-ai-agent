@@ -25,7 +25,7 @@ public sealed class AskKnowledgeTool(AgentKnowledgeService kb, AgentUsageCounter
     {
         var q = args.TryGetProperty("question", out var qEl) ? qEl.GetString() ?? "" : "";
         var (json, usage) = await kb.AskKnowledgeAsync(q, ctx.Language, ct);
-        AgentCostCalculator.Compute(usage, opts.Value);
+        AgentCostCalculator.Compute(usage, opts.Value, opts.Value.FastModel);
         usageCounter.Add(usage);
         return json;
     }

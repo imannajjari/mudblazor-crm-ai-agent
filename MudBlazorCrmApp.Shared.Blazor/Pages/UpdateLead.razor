@@ -1,19 +1,20 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Lead</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_LEAD"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -23,13 +24,13 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Lead</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_LEAD"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Source" For="@(() => record.Source)" Label="Source" />
-                <MudTextField @bind-Value="record.Status" For="@(() => record.Status)" Label="Status" />
-                <MudNumericField @bind-Value="record.PotentialValue" For="@(() => record.PotentialValue)" Label="PotentialValue" />
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Source" For="@(() => record.Source)" Label="@L["FLD_SOURCE"]" />
+                <MudTextField @bind-Value="record.Status" For="@(() => record.Status)" Label="@L["FLD_STATUS"]" />
+                <MudNumericField @bind-Value="record.PotentialValue" For="@(() => record.PotentialValue)" Label="@L["FLD_POTENTIAL_VALUE"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Photo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -41,22 +42,22 @@ else
                 {
                     <MudImage Src="@GetAbsoluteUri(record.Photo)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
                 }
-                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
-                <MudSelect @bind-Value="record.AddressId" For="@(() => record.AddressId)" Label="Address" AnchorOrigin="Origin.BottomCenter">
+                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
+                <MudSelect @bind-Value="record.AddressId" For="@(() => record.AddressId)" Label="@L["ENT_ADDRESS"]" AnchorOrigin="Origin.BottomCenter">
                     <MudSelectItem T="long?" Value="null" />
                     @foreach (var address in addressArray ?? Enumerable.Empty<Address>())
                     {
                         <MudSelectItem Value="@address.Id">@address.City</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect @bind-Value="record.OpportunityId" For="@(() => record.OpportunityId)" Label="Opportunity" AnchorOrigin="Origin.BottomCenter">
+                <MudSelect @bind-Value="record.OpportunityId" For="@(() => record.OpportunityId)" Label="@L["ENT_OPPORTUNITY"]" AnchorOrigin="Origin.BottomCenter">
                     <MudSelectItem T="long?" Value="null" />
                     @foreach (var opportunity in opportunityArray ?? Enumerable.Empty<Opportunity>())
                     {
                         <MudSelectItem Value="@opportunity.Id">@opportunity.Stage</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect @bind-Value="record.ContactId" For="@(() => record.ContactId)" Label="Contact" AnchorOrigin="Origin.BottomCenter">
+                <MudSelect @bind-Value="record.ContactId" For="@(() => record.ContactId)" Label="@L["ENT_CONTACT"]" AnchorOrigin="Origin.BottomCenter">
                     <MudSelectItem T="long?" Value="null" />
                     @foreach (var contact in contactArray ?? Enumerable.Empty<Contact>())
                     {
@@ -69,8 +70,8 @@ else
                 <EntityTimeline EntityType="Lead" EntityId="@(record.Id ?? 0)" />
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

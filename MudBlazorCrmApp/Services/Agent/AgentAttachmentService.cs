@@ -151,7 +151,7 @@ public sealed partial class AgentAttachmentService(
         var llmProvider = scope.ServiceProvider.GetRequiredService<IAgentLlmProvider>();
         var modelOverride = rec.Kind == "Image" ? optionsAccessor.Value.VisionModel : optionsAccessor.Value.FastModel;
         var res = await llmProvider.CompleteAsync(messages, tools: null, modelOverride, ct);
-        AgentCostCalculator.Compute(res.Usage, optionsAccessor.Value);
+        AgentCostCalculator.Compute(res.Usage, optionsAccessor.Value, modelOverride);
         if (res.Error != null)
             return (JsonSerializer.Serialize(new { ok = false, error = res.Error }), res.Usage);
 

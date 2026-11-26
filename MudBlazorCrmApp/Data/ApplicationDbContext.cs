@@ -476,5 +476,27 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         modelBuilder.Entity<Reward>()
             .Property(e => e.ConversionRate)
             .HasPrecision(19, 4);
+
+        // Agent tables configuration
+        modelBuilder.Entity<AgentChat>()
+            .HasIndex(e => new { e.UserId, e.ChatKey })
+            .IsUnique();
+        modelBuilder.Entity<AgentChat>()
+            .HasIndex(e => new { e.UserId, e.UpdatedDate });
+
+        modelBuilder.Entity<AgentTask>()
+            .Property(e => e.Cost)
+            .HasPrecision(19, 8);
+        modelBuilder.Entity<AgentTask>()
+            .HasIndex(e => new { e.UserId, e.ChatKey, e.TaskSeq })
+            .IsUnique();
+        modelBuilder.Entity<AgentTask>()
+            .HasIndex(e => new { e.UserId, e.CreatedDate });
+
+        modelBuilder.Entity<AgentKnowledge>()
+            .HasIndex(e => e.FactHash)
+            .IsUnique();
+        modelBuilder.Entity<AgentKnowledge>()
+            .HasIndex(e => e.IsRetired);
     }
 }

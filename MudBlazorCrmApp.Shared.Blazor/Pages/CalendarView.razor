@@ -2,11 +2,12 @@
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Calendar</PageTitle>
+<PageTitle>@L["NAV_CALENDAR"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Calendar</MudText>
+    <MudText Typo="Typo.h3">@L["NAV_CALENDAR"]</MudText>
 </div>
 
 <MudPaper Class="pa-4" Elevation="3">
@@ -15,11 +16,11 @@
         <MudText Typo="Typo.h5" Class="mx-4">@currentDate.ToString("MMMM yyyy")</MudText>
         <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="NextMonth" />
         <MudSpacer />
-        <MudButton Variant="Variant.Outlined" OnClick="GoToToday">Today</MudButton>
-        <MudSelect T="string" Value="viewFilter" Label="Filter" Dense="true" Style="max-width:150px;" ValueChanged="OnFilterChanged">
-            <MudSelectItem Value="@("All")">All</MudSelectItem>
-            <MudSelectItem Value="@("Activities")">Activities</MudSelectItem>
-            <MudSelectItem Value="@("Tasks")">Tasks</MudSelectItem>
+        <MudButton Variant="Variant.Outlined" OnClick="GoToToday">@L["UI_TODAY"]</MudButton>
+        <MudSelect T="string" Value="viewFilter" Label="@L["UI_FILTER"]" Dense="true" Style="max-width:150px;" ValueChanged="OnFilterChanged">
+            <MudSelectItem Value="@("All")">@L["CAL_ALL"]</MudSelectItem>
+            <MudSelectItem Value="@("Activities")">@L["ENT_ACTIVITIES"]</MudSelectItem>
+            <MudSelectItem Value="@("Tasks")">@L["ENT_TODO_TASKS"]</MudSelectItem>
         </MudSelect>
     </MudStack>
 
@@ -29,7 +30,7 @@
     }
 
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e0e0e0;border:1px solid #e0e0e0;">
-        @foreach (var dayName in dayNames)
+        @foreach (var dayName in (L.Language == "fa" ? dayNamesFa : dayNamesEn))
         {
             <div style="text-align:center;padding:8px;background:var(--mud-palette-surface);font-weight:bold;">@dayName</div>
         }
@@ -45,7 +46,7 @@
                 }
                 @if (GetEventsForDay(day).Count > 3)
                 {
-                    <div style="font-size:0.65rem;color:gray;">+@(GetEventsForDay(day).Count - 3) more</div>
+                    <div style="font-size:0.65rem;color:gray;">+@(GetEventsForDay(day).Count - 3) @L["CAL_MORE"]</div>
                 }
             </div>
         }
@@ -53,10 +54,10 @@
 </MudPaper>
 
 <MudPaper Class="pa-4 mt-4" Elevation="3">
-    <MudText Typo="Typo.h6" Class="mb-2">Events for @selectedDate.ToString("MMMM dd, yyyy")</MudText>
+    <MudText Typo="Typo.h6" Class="mb-2">@L["CAL_EVENTS_FOR"] @selectedDate.ToString("MMMM dd, yyyy")</MudText>
     @if (GetEventsForDay(selectedDate).Count == 0)
     {
-        <MudText Typo="Typo.body2" Color="Color.Secondary">No events on this day</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["UI_NO_EVENTS_DAY"]</MudText>
     }
     else
     {
@@ -85,7 +86,8 @@
     private DateTime selectedDate = DateTime.Today;
     private bool isLoading;
     private string viewFilter = "All";
-    private static readonly string[] dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    private static readonly string[] dayNamesEn = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    private static readonly string[] dayNamesFa = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"];
 
     private Activity[]? activities;
     private TodoTask[]? todoTasks;

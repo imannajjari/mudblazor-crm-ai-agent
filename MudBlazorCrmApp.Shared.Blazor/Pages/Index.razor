@@ -1,5 +1,6 @@
 @page "/"
 @inject NavigationManager NavigationManager
+@inject AppText L
 
 <AuthorizeView>
     <Authorized>
@@ -7,9 +8,9 @@
     </Authorized>
     <NotAuthorized>
         <div class="mb-3">
-            <MudText Typo="Typo.h3">Welcome to MudBlazor CRM</MudText>
+            <MudText Typo="Typo.h3">@L["HOME_WELCOME"]</MudText>
         </div>
-        <MudText>Your complete Customer Relationship Management solution.</MudText>
+        <MudText>@L["HOME_SUBTITLE"]</MudText>
         <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-16">
             <MudPaper Class="pa-8 mud-elevation-4">
                 <MudGrid Spacing="4">
@@ -17,26 +18,23 @@
                         <MudPaper Class="pa-8 mud-elevation-2 rounded-lg" Style="background-color: var(--mud-palette-surface-lighten)">
                             <MudGrid Spacing="4">
                                 <MudItem xs="12" md="8">
-                                    <MudText Typo="Typo.h4" GutterBottom>Streamline Your Business Relationships</MudText>
-                                    <MudText Typo="Typo.body1" Class="mb-4">
-                                        Manage customers, track leads, close deals, and provide excellent support - all in one powerful platform.
-                                        Built with modern .NET 9 and Blazor technologies.
-                                    </MudText>
-                                    <MudButton Href="/login" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large">Sign In</MudButton>
-                                    <MudButton Href="/register" Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Large" Class="ml-4">Register</MudButton>
+                                    <MudText Typo="Typo.h4" GutterBottom>@L["HOME_HERO_TITLE"]</MudText>
+                                    <MudText Typo="Typo.body1" Class="mb-4">@L["HOME_HERO_DESC"]</MudText>
+                                    <MudButton Href="/login" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large">@L["UI_SIGN_IN"]</MudButton>
+                                    <MudButton Href="/register" Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Large" Class="ml-4">@L["NAV_REGISTER"]</MudButton>
                                 </MudItem>
                             </MudGrid>
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12">
-                        <MudText Typo="Typo.h5" Class="mb-4">Key Features</MudText>
+                        <MudText Typo="Typo.h5" Class="mb-4">@L["HOME_KEY_FEATURES"]</MudText>
                         <MudGrid Spacing="4">
                             <MudItem xs="12" md="4">
                                 <MudCard Class="mud-elevation-2 rounded-lg" Style="height: 100%;">
                                     <MudCardContent Class="pa-6 text-center">
                                         <MudIcon Icon="@Icons.Material.Filled.People" Size="Size.Large" Color="Color.Primary" Class="mb-3" />
-                                        <MudText Typo="Typo.subtitle1" GutterBottom>Customer Management</MudText>
-                                        <MudText Typo="Typo.body2">Track companies, contacts, and relationships. Keep all customer information organized and accessible.</MudText>
+                                        <MudText Typo="Typo.subtitle1" GutterBottom>@L["HOME_FEAT_CUSTOMERS_TITLE"]</MudText>
+                                        <MudText Typo="Typo.body2">@L["HOME_FEAT_CUSTOMERS_DESC"]</MudText>
                                     </MudCardContent>
                                 </MudCard>
                             </MudItem>
@@ -44,8 +42,8 @@
                                 <MudCard Class="mud-elevation-2 rounded-lg" Style="height: 100%;">
                                     <MudCardContent Class="pa-6 text-center">
                                         <MudIcon Icon="@Icons.Material.Filled.TrendingUp" Size="Size.Large" Color="Color.Success" Class="mb-3" />
-                                        <MudText Typo="Typo.subtitle1" GutterBottom>Sales Pipeline</MudText>
-                                        <MudText Typo="Typo.body2">Manage leads, opportunities, and deals. Track your sales pipeline from prospect to close.</MudText>
+                                        <MudText Typo="Typo.subtitle1" GutterBottom>@L["RPT_SALES_PIPELINE"]</MudText>
+                                        <MudText Typo="Typo.body2">@L["HOME_FEAT_PIPELINE_DESC"]</MudText>
                                     </MudCardContent>
                                 </MudCard>
                             </MudItem>
@@ -53,8 +51,8 @@
                                 <MudCard Class="mud-elevation-2 rounded-lg" Style="height: 100%;">
                                     <MudCardContent Class="pa-6 text-center">
                                         <MudIcon Icon="@Icons.Material.Filled.SupportAgent" Size="Size.Large" Color="Color.Warning" Class="mb-3" />
-                                        <MudText Typo="Typo.subtitle1" GutterBottom>Support Cases</MudText>
-                                        <MudText Typo="Typo.body2">Handle customer issues efficiently with SLA tracking, priority management, and resolution workflows.</MudText>
+                                        <MudText Typo="Typo.subtitle1" GutterBottom>@L["ENT_SUPPORT_CASES"]</MudText>
+                                        <MudText Typo="Typo.body2">@L["HOME_FEAT_SUPPORT_DESC"]</MudText>
                                     </MudCardContent>
                                 </MudCard>
                             </MudItem>
@@ -66,8 +64,8 @@
                                 <MudCard Class="mud-elevation-2 rounded-lg" Style="height: 100%;">
                                     <MudCardContent Class="pa-6 text-center">
                                         <MudIcon Icon="@Icons.Material.Filled.Dashboard" Size="Size.Large" Color="Color.Info" Class="mb-3" />
-                                        <MudText Typo="Typo.subtitle1" GutterBottom>Interactive Dashboard</MudText>
-                                        <MudText Typo="Typo.body2">Real-time KPIs and analytics with customizable charts and drag-and-drop widgets.</MudText>
+                                        <MudText Typo="Typo.subtitle1" GutterBottom>@L["HOME_FEAT_DASHBOARD_TITLE"]</MudText>
+                                        <MudText Typo="Typo.body2">@L["HOME_FEAT_DASHBOARD_DESC"]</MudText>
                                     </MudCardContent>
                                 </MudCard>
                             </MudItem>
@@ -75,8 +73,8 @@
                                 <MudCard Class="mud-elevation-2 rounded-lg" Style="height: 100%;">
                                     <MudCardContent Class="pa-6 text-center">
                                         <MudIcon Icon="@Icons.Material.Filled.ViewKanban" Size="Size.Large" Color="Color.Secondary" Class="mb-3" />
-                                        <MudText Typo="Typo.subtitle1" GutterBottom>Kanban Board</MudText>
-                                        <MudText Typo="Typo.body2">Visual task management with drag-and-drop Kanban boards for team productivity.</MudText>
+                                        <MudText Typo="Typo.subtitle1" GutterBottom>@L["NAV_KANBAN_BOARD"]</MudText>
+                                        <MudText Typo="Typo.body2">@L["HOME_FEAT_KANBAN_DESC"]</MudText>
                                     </MudCardContent>
                                 </MudCard>
                             </MudItem>
@@ -84,20 +82,20 @@
                                 <MudCard Class="mud-elevation-2 rounded-lg" Style="height: 100%;">
                                     <MudCardContent Class="pa-6 text-center">
                                         <MudIcon Icon="@Icons.Material.Filled.Inventory" Size="Size.Large" Color="Color.Tertiary" Class="mb-3" />
-                                        <MudText Typo="Typo.subtitle1" GutterBottom>Products & Services</MudText>
-                                        <MudText Typo="Typo.body2">Manage your product catalog, services, vendors, and track sales transactions.</MudText>
+                                        <MudText Typo="Typo.subtitle1" GutterBottom>@L["NAV_PRODUCTS_GROUP"]</MudText>
+                                        <MudText Typo="Typo.body2">@L["HOME_FEAT_PRODUCTS_DESC"]</MudText>
                                     </MudCardContent>
                                 </MudCard>
                             </MudItem>
                         </MudGrid>
                     </MudItem>
                     <MudItem xs="12" Class="text-center mt-8">
-                        <MudText Typo="Typo.h6" Color="Color.Dark">Ready to get started?</MudText>
-                        <MudButton Href="/register" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" Class="mt-4">Create Free Account</MudButton>
+                        <MudText Typo="Typo.h6" Color="Color.Dark">@L["HOME_READY"]</MudText>
+                        <MudButton Href="/register" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" Class="mt-4">@L["UI_CREATE_ACCOUNT"]</MudButton>
                     </MudItem>
                 </MudGrid>
             </MudPaper>
-            <MudText Align="Align.Center" Class="mt-8">© 2026 MudBlazor CRM</MudText>
+            <MudText Align="Align.Center" Class="mt-8">ï¿½ 2026 MudBlazor CRM</MudText>
         </MudContainer>
     </NotAuthorized>
 </AuthorizeView>

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using MudBlazorCrmApp.Data;
 using MudBlazorCrmApp.Models;
 
@@ -13,7 +14,8 @@ namespace MudBlazorCrmApp.Services.Agent;
 public sealed class AgentKnowledgeService(
     ApplicationDbContext db,
     IAgentLlmProvider llmProvider,
-    ILogger<AgentKnowledgeService> logger)
+    ILogger<AgentKnowledgeService> logger,
+    IOptions<AgentOptions>? optionsAccessor = null)
 {
     private const int SideCallThreshold = 200;
     private const int MaxFactsInContext = 5;
@@ -157,7 +159,8 @@ public sealed class AgentKnowledgeService(
             new() { ["role"] = "user", ["content"] = $"Question: {question}\n\nFacts:\n{factsBlock}" }
         };
 
-        var res = await llmProvider.CompleteAsync(messages, tools: null, ct);
+        var fastModel = optionsAccessor?.Value.FastModel;
+        var res = await llmProvider.CompleteAsync(messages, tools: null, fastModel, ct);
         usage = res.Usage;
         if (res.Error != null)
             return (JsonSerializer.Serialize(new { ok = false, reason = res.Error }), usage);

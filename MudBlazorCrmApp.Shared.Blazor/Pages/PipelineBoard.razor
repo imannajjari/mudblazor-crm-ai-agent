@@ -5,11 +5,12 @@
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
 @attribute [Authorize]
+@inject AppText L
 
-<PageTitle>Deal Pipeline</PageTitle>
+<PageTitle>@L["RPT_DEAL_PIPELINE"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Deal Pipeline</MudText>
+    <MudText Typo="Typo.h3">@L["RPT_DEAL_PIPELINE"]</MudText>
 </div>
 
 <MudDropContainer T="PipelineItem" @ref="_dropContainer" Items="@_items" ItemsSelector="@((item,column) => item.Stage == column)" ItemDropped="StageUpdated" Class="d-flex flex-wrap flex-grow-1">
@@ -23,7 +24,7 @@
                     <MudText Typo="Typo.caption" Color="Color.Primary">@GetStageTotal(stage)</MudText>
                 </MudToolBar>
                 <MudDropZone T="PipelineItem" Identifier="@stage" Class="mud-height-full" />
-                <MudButton OnClick="@(() => OnAddToStage(stage))" StartIcon="@Icons.Material.Filled.Add" FullWidth="true" Class="rounded-lg py-2">Add Deal</MudButton>
+                <MudButton OnClick="@(() => OnAddToStage(stage))" StartIcon="@Icons.Material.Filled.Add" FullWidth="true" Class="rounded-lg py-2">@L["PIP_ADD_DEAL"]</MudButton>
             </MudPaper>
         }
     </ChildContent>
@@ -39,11 +40,11 @@
                 @if (context.Probability.HasValue)
                 {
                     <MudProgressLinear Color="Color.Primary" Value="@((double)context.Probability)" Class="mt-2" />
-                    <MudText Typo="Typo.caption">@($"{context.Probability}% probability")</MudText>
+                    <MudText Typo="Typo.caption">@($"{context.Probability}% {L["PIP_PROBABILITY"]}")</MudText>
                 }
                 @if (context.EstimatedCloseDate.HasValue)
                 {
-                    <MudText Typo="Typo.caption" Class="mt-1">Close: @context.EstimatedCloseDate.Value.ToString("MMM dd, yyyy")</MudText>
+                    <MudText Typo="Typo.caption" Class="mt-1">@L["PIP_CLOSE"]: @context.EstimatedCloseDate.Value.ToString("MMM dd, yyyy")</MudText>
                 }
                 <div style="display: flex; justify-content: end; width: 100%; margin-top: 8px;">
                     <MudIconButton OnClick="@(e => OnEdit(context))" Variant="Variant.Text" Color="Color.Primary" Icon="@Icons.Material.TwoTone.Edit" Size="Size.Small" />
@@ -147,7 +148,7 @@
     private async void OnAddToStage(string stage)
     {
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
-        var dialogRef = await DialogService.ShowAsync<AddOpportunity>("Add Opportunity", dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<AddOpportunity>(L["ADD_OPPORTUNITY"], dialogOptions);
         var result = await dialogRef.Result;
         if (!result.Canceled)
         {
@@ -159,7 +160,7 @@
     {
         DialogParameters<UpdateOpportunity> dialogParams = new() { { x => x.Id, item.Id } };
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
-        var dialogRef = await DialogService.ShowAsync<UpdateOpportunity>("Update Opportunity", dialogParams, dialogOptions);
+        var dialogRef = await DialogService.ShowAsync<UpdateOpportunity>(L["UPD_OPPORTUNITY"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
         if (!result.Canceled)
         {
@@ -169,7 +170,7 @@
 
     private async void OnDelete(PipelineItem item)
     {
-        var result = await DialogService.ShowMessageBoxAsync("Warning", "Are you sure you want to delete this deal?", "Delete", "Cancel");
+        var result = await DialogService.ShowMessageBoxAsync(L["UI_WARNING"], "Are you sure you want to delete this deal?", L["ACTION_DELETE"], L["ACTION_CANCEL"]);
         if (result.GetValueOrDefault(false))
         {
             try

@@ -3,14 +3,15 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager Navigation
 @inject AgentClientService Agent
+@inject AppText L
 
-<PageTitle>Logout</PageTitle>
+<PageTitle>@L["NAV_LOGOUT"]</PageTitle>
 
 <div class="mb-3">
-    <MudText Typo="Typo.h3">Logout</MudText>
+    <MudText Typo="Typo.h3">@L["NAV_LOGOUT"]</MudText>
 </div>
 
-<MudText>Logging out...</MudText>
+<MudText>@L["UI_LOGGING_OUT"]</MudText>
 
 @code {
     protected override async Task OnInitializedAsync()

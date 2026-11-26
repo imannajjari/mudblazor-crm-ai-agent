@@ -95,10 +95,9 @@ public sealed class MemoryCacheRateLimiter(IMemoryCache cache) : IAgentRateLimit
 
 public static class AgentCostCalculator
 {
-    private const decimal CachedTokenDiscount = 0.25m;
     private const decimal TokensPerMillion = 1_000_000m;
 
-    public static void Compute(AgentUsageModel usage, AgentOptions options)
+    public static void Compute(AgentUsageModel usage, AgentOptions options, string? modelName = null)
     {
         if (!options.ShowCost || usage.Calls <= 0)
         {
@@ -106,14 +105,15 @@ public static class AgentCostCalculator
             return;
         }
 
+        var rates = AgentModelPrice.Resolve(modelName ?? options.Model, options);
         var safeInput = Math.Max(0, usage.InputTokens);
         var safeOutput = Math.Max(0, usage.OutputTokens);
         var clampedCached = Math.Clamp(usage.CachedInputTokens, 0, safeInput);
         var uncachedInput = safeInput - clampedCached;
 
-        var inputCost = (uncachedInput * options.InputPricePerMillionTokensUsd
-                         + clampedCached * (options.InputPricePerMillionTokensUsd * CachedTokenDiscount)) / TokensPerMillion;
-        var outputCost = safeOutput * options.OutputPricePerMillionTokensUsd / TokensPerMillion;
+        var inputCost = (uncachedInput * rates.InputPerMillion
+                         + clampedCached * rates.CachedInputPerMillion) / TokensPerMillion;
+        var outputCost = safeOutput * rates.OutputPerMillion / TokensPerMillion;
         usage.Cost = Math.Round(inputCost + outputCost, 6);
     }
 

@@ -2,19 +2,20 @@
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @inject IDialogService DialogService
+@inject AppText L
 
 @if (record == null)
 {
     <MudDialog>
         <TitleContent>
-            <MudText Typo="Typo.h6">Update Contact</MudText>
+            <MudText Typo="Typo.h6">@L["UPD_CONTACT"]</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText>Loading...</MudText>
+            <MudText>@L["UI_LOADING"]</MudText>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="OnCancel">Cancel</MudButton>
-            <MudButton Color="Color.Primary" Disabled="true">Update</MudButton>
+            <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
+            <MudButton Color="Color.Primary" Disabled="true">@L["UI_UPDATE"]</MudButton>
         </DialogActions>
     </MudDialog>
 }
@@ -24,34 +25,34 @@ else
         <DataAnnotationsValidator />
         <MudDialog>
             <TitleContent>
-                <MudText Typo="Typo.h6">Update Contact</MudText>
+                <MudText Typo="Typo.h6">@L["UPD_CONTACT"]</MudText>
             </TitleContent>
             <DialogContent>
-                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="Id" ReadOnly="true" />
-                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="Name" />
-                <MudTextField @bind-Value="record.Company" For="@(() => record.Company)" Label="Company" />
-                <MudTextField @bind-Value="record.Title" For="@(() => record.Title)" Label="Title" />
-                <MudTextField @bind-Value="record.Email" For="@(() => record.Email)" Label="Email" />
-                <MudTextField @bind-Value="record.Phone" For="@(() => record.Phone)" Label="Phone" />
-                <MudTextField @bind-Value="record.MobilePhone" For="@(() => record.MobilePhone)" Label="Mobile Phone" />
-                <MudTextField @bind-Value="record.Role" For="@(() => record.Role)" Label="Role" />
-                <MudTextField @bind-Value="record.Department" For="@(() => record.Department)" Label="Department" />
-                <MudTextField @bind-Value="record.LinkedInUrl" For="@(() => record.LinkedInUrl)" Label="LinkedIn URL" />
-                <MudSelect @bind-Value="record.Status" Label="Status" For="@(() => record.Status)">
+                <MudNumericField @bind-Value="record.Id" For="@(() => record.Id)" Label="@L["FLD_ID"]" ReadOnly="true" />
+                <MudTextField @bind-Value="record.Name" For="@(() => record.Name)" Label="@L["FLD_NAME"]" />
+                <MudTextField @bind-Value="record.Company" For="@(() => record.Company)" Label="@L["FLD_COMPANY"]" />
+                <MudTextField @bind-Value="record.Title" For="@(() => record.Title)" Label="@L["FLD_TITLE"]" />
+                <MudTextField @bind-Value="record.Email" For="@(() => record.Email)" Label="@L["FLD_EMAIL"]" />
+                <MudTextField @bind-Value="record.Phone" For="@(() => record.Phone)" Label="@L["FLD_PHONE"]" />
+                <MudTextField @bind-Value="record.MobilePhone" For="@(() => record.MobilePhone)" Label="@L["FLD_MOBILE_PHONE"]" />
+                <MudTextField @bind-Value="record.Role" For="@(() => record.Role)" Label="@L["FLD_ROLE"]" />
+                <MudTextField @bind-Value="record.Department" For="@(() => record.Department)" Label="@L["FLD_DEPARTMENT"]" />
+                <MudTextField @bind-Value="record.LinkedInUrl" For="@(() => record.LinkedInUrl)" Label="@L["FLD_LINKEDIN"]" />
+                <MudSelect @bind-Value="record.Status" Label="@L["FLD_STATUS"]" For="@(() => record.Status)">
                     <MudSelectItem Value="@((string?)null)">-- Select --</MudSelectItem>
                     <MudSelectItem Value="@("Active")">Active</MudSelectItem>
                     <MudSelectItem Value="@("Inactive")">Inactive</MudSelectItem>
                     <MudSelectItem Value="@("Prospect")">Prospect</MudSelectItem>
                 </MudSelect>
-                <MudSelect @bind-Value="record.PreferredContactMethod" Label="Preferred Contact Method" For="@(() => record.PreferredContactMethod)">
+                <MudSelect @bind-Value="record.PreferredContactMethod" Label="@L["FLD_PREFERRED_METHOD"]" For="@(() => record.PreferredContactMethod)">
                     <MudSelectItem Value="@((string?)null)">-- Select --</MudSelectItem>
                     <MudSelectItem Value="@("Email")">Email</MudSelectItem>
                     <MudSelectItem Value="@("Phone")">Phone</MudSelectItem>
                     <MudSelectItem Value="@("SMS")">SMS</MudSelectItem>
                     <MudSelectItem Value="@("LinkedIn")">LinkedIn</MudSelectItem>
                 </MudSelect>
-                <MudCheckBox @bind-Value="record.IsPrimary" Label="Primary Contact" />
-                <MudCheckBox @bind-Value="record.DoNotContact" Label="Do Not Contact" />
+                <MudCheckBox @bind-Value="record.IsPrimary" Label="@L["FLD_PRIMARY_CONTACT"]" />
+                <MudCheckBox @bind-Value="record.DoNotContact" Label="@L["FLD_DO_NOT_CONTACT"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Photo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
                     <ActivatorContent>
                         <MudIconButton Color="Color.Info"
@@ -63,15 +64,15 @@ else
                 {
                     <MudImage Src="@GetAbsoluteUri(record.Photo)" Style="width:128px;height:128px;object-fit:contain;" Class="mt-1" />
                 }
-                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="Notes" />
-                <MudSelect @bind-Value="record.AddressId" For="@(() => record.AddressId)" Label="Address" AnchorOrigin="Origin.BottomCenter">
+                <MudTextField @bind-Value="record.Notes" For="@(() => record.Notes)" Label="@L["FLD_NOTES"]" />
+                <MudSelect @bind-Value="record.AddressId" For="@(() => record.AddressId)" Label="@L["ENT_ADDRESS"]" AnchorOrigin="Origin.BottomCenter">
                     <MudSelectItem T="long?" Value="null" />
                     @foreach (var address in addressArray ?? Enumerable.Empty<Address>())
                     {
                         <MudSelectItem Value="@address.Id">@address.City</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="long?" Label="Reward" MultiSelection="true" @bind-SelectedValues="rewardValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => rewardArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Rewardpoints)))" AnchorOrigin="Origin.BottomCenter">
+                <MudSelect T="long?" Label="@L["ENT_REWARD"]" MultiSelection="true" @bind-SelectedValues="rewardValues" MultiSelectionTextFunc="@(x => string.Join(", ", x.Select(s => rewardArray?.FirstOrDefault(i => i.Id?.ToString() == s)?.Rewardpoints)))" AnchorOrigin="Origin.BottomCenter">
                     @foreach (var reward in rewardArray ?? Enumerable.Empty<Reward>())
                     {
                         <MudSelectItem T="long?" Value="@reward.Id">@reward.Rewardpoints</MudSelectItem>
@@ -83,12 +84,12 @@ else
                 <EntityTimeline EntityType="Contact" EntityId="@(record.Id ?? 0)" />
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="OnCancel">Cancel</MudButton>
+                <MudButton OnClick="OnCancel">@L["ACTION_CANCEL"]</MudButton>
                 @if (!string.IsNullOrEmpty(record?.Email))
                 {
-                    <MudButton Color="Color.Info" StartIcon="@Icons.Material.Filled.Email" OnClick="OnSendEmail">Email</MudButton>
+                    <MudButton Color="Color.Info" StartIcon="@Icons.Material.Filled.Email" OnClick="OnSendEmail">@L["FLD_EMAIL"]</MudButton>
                 }
-                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">Update</MudButton>
+                <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary">@L["UI_UPDATE"]</MudButton>
             </DialogActions>
         </MudDialog>
     </EditForm>

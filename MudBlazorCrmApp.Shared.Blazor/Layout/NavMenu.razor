@@ -13,22 +13,50 @@
     <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())" />
     <MudText>@L["APP_TITLE"]</MudText>
     <MudSpacer />
-    @if (_agentEnabled)
-    {
-        <MudIconButton Icon="@MudBlazorCrmApp.Shared.Blazor.Services.Agent.AgentIcons.CopilotSvg"
-                       Color="Color.Inherit"
-                       title="@L["AGENT_BUTTON_TOOLTIP"]"
-                       OnClick="@(() => { Agent.IsDrawerOpen = !Agent.IsDrawerOpen; })"
-                       data-testid="agent-open-button" />
-    }
     <AuthorizeView>
-        <MudAutocomplete T="SearchResultItem" SearchFunc="@SearchEntities" Placeholder="@L["HEADER_SEARCH_PLACEHOLDER"]" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Dense="true" Class="mr-4" Style="max-width:300px;color:inherit;" ToStringFunc="@(item => item?.Name ?? "")" ValueChanged="@OnSearchItemSelected" ResetValueOnEmptyText="true" />
+        <MudAutocomplete T="SearchResultItem"
+                         SearchFunc="@SearchEntities"
+                         Placeholder="@L["HEADER_SEARCH_PLACEHOLDER"]"
+                         Adornment="Adornment.Start"
+                         AdornmentIcon="@Icons.Material.Filled.Search"
+                         AdornmentColor="Color.Inherit"
+                         Dense="true"
+                         Class="mr-4 header-search-input"
+                         Style="max-width:300px;color:#fff;"
+                         ToStringFunc="@(item => item?.Name ?? "")"
+                         ValueChanged="@OnSearchItemSelected"
+                         DebounceInterval="250"
+                         ResetValueOnEmptyText="true"
+                         Clearable="true"
+                         MinCharacters="1">
+            <ItemTemplate Context="item">
+                <MudText Typo="Typo.body2">@item.Name <MudText Typo="Typo.caption" Color="Color.Secondary">(@item.EntityType)</MudText></MudText>
+            </ItemTemplate>
+        </MudAutocomplete>
     </AuthorizeView>
     <AuthorizeView>
         <Authorized>
             <MudBadge Content="@_unreadCount" Color="Color.Error" Overlap="true" Visible="@(_unreadCount > 0)">
                 <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit" OnClick="@ToggleNotifications" />
             </MudBadge>
+            @if (_agentEnabled)
+            {
+                <button class="agent-ai-btn mx-1 @(Agent.IsDrawerOpen ? "agent-ai-btn--active" : "")"
+                        title="@L["AGENT_BUTTON_TOOLTIP"]"
+                        @onclick="@(() => { Agent.IsDrawerOpen = !Agent.IsDrawerOpen; })"
+                        data-testid="agent-open-button">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="agent-ai-btn__svg">
+                        <path d="M12 2C12 2 13.5 7.5 17 10C13.5 12.5 12 18 12 18C12 18 10.5 12.5 7 10C10.5 7.5 12 2 12 2Z" fill="#ffffff"/>
+                        <circle cx="19" cy="5" r="1.4" fill="#e0e7ff"/>
+                        <circle cx="5" cy="16" r="1.1" fill="#e0e7ff" opacity="0.85"/>
+                        <circle cx="18.5" cy="17" r="0.85" fill="#e0e7ff" opacity="0.75"/>
+                    </svg>
+                    @if (Agent.IsRunning)
+                    {
+                        <span class="agent-ai-btn__working-dot"></span>
+                    }
+                </button>
+            }
             <MudPopover Open="@_notificationsOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="pa-4" Style="max-width:400px;max-height:500px;overflow-y:auto;">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
                     <MudText Typo="Typo.h6">@L["HEADER_NOTIFICATIONS"]</MudText>
@@ -197,11 +225,28 @@
             PaletteLight = new PaletteLight()
             {
                 Primary = _themeManager.PrimaryColor,
+                Secondary = "#0EA5E9",
+                Background = "#F8FAFC",
+                Surface = "#FFFFFF",
+                DrawerBackground = "#FFFFFF",
+                DrawerText = "#1E293B",
                 AppbarBackground = _themeManager.PrimaryColor,
+                LinesDefault = "rgba(15, 23, 42, 0.08)"
             },
             PaletteDark = new PaletteDark()
             {
                 Primary = _themeManager.PrimaryColor,
+                Secondary = "#38BDF8",
+                Background = "#0B1120",
+                Surface = "#111827",
+                DrawerBackground = "#0F172A",
+                AppbarBackground = "#0F172A",
+                LinesDefault = "rgba(255, 255, 255, 0.08)"
+            },
+            LayoutProperties = new LayoutProperties()
+            {
+                DefaultBorderRadius = "12px",
+                AppbarHeight = "60px"
             }
         };
 
@@ -249,7 +294,7 @@
 
     private async Task<IEnumerable<SearchResultItem>> SearchEntities(string value, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Length < 2)
+        if (string.IsNullOrWhiteSpace(value))
             return Enumerable.Empty<SearchResultItem>();
 
         try
