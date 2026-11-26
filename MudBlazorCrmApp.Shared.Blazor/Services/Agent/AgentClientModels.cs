@@ -3,6 +3,18 @@ using System.Net.Http.Json;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
+public sealed record AttachedFileItem(string Id, string FileName, string Kind, long SizeBytes, DateTime ExpiresUtc, string? Error = null);
+
+internal sealed class AttachmentUploadResponseDto
+{
+    public string? Id { get; set; }
+    public string? FileName { get; set; }
+    public string? Kind { get; set; }
+    public long SizeBytes { get; set; }
+    public DateTime ExpiresUtc { get; set; }
+    public string? Error { get; set; }
+}
+
 internal sealed class TaskRunState(string chatKey, int taskSeq, DateTimeOffset startedAt)
 {
     public string ChatKey { get; } = chatKey;
@@ -23,6 +35,7 @@ internal sealed class AgentStatusDto
     public int MaxTaskModelCalls { get; set; } = 40;
     public decimal MaxTaskCostUsd { get; set; } = 0.80m;
     public bool ShowCost { get; set; } = true;
+    public bool Vision { get; set; } = true;
 }
 
 internal sealed class AgentStepResponseDto
@@ -62,16 +75,46 @@ internal sealed class AgentStepApiClient(HttpClient httpClient, IAccessTokenProv
             modelCallsSoFar = run.Calls,
             costSoFarUsd = run.Cost
         };
-        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/agent/step")
+        using var res = await SendAuthorizedAsync(HttpMethod.Post, "/api/agent/step", JsonContent.Create(payload), ct);
+        res.EnsureSuccessStatusCode();
+        return await res.Content.ReadFromJsonAsync<AgentStepResponseDto>(cancellationToken: ct);
+    }
+
+    public async Task<AttachmentUploadResponseDto?> UploadAttachmentAsync(string chatKey, string fileName, byte[] bytes, CancellationToken ct)
+    {
+        var payload = new { chatKey, fileName, content = Convert.ToBase64String(bytes) };
+        using var res = await SendAuthorizedAsync(HttpMethod.Post, "/api/agent/attachment", JsonContent.Create(payload), ct);
+        if (!res.IsSuccessStatusCode)
         {
-            Content = JsonContent.Create(payload)
-        };
+            try
+            {
+                var errBody = await res.Content.ReadFromJsonAsync<AttachmentUploadResponseDto>(cancellationToken: ct);
+                return errBody ?? new AttachmentUploadResponseDto { Error = $"HTTP {(int)res.StatusCode}" };
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return new AttachmentUploadResponseDto { Error = $"HTTP {(int)res.StatusCode}" };
+            }
+        }
+        return await res.Content.ReadFromJsonAsync<AttachmentUploadResponseDto>(cancellationToken: ct);
+    }
+
+    public async Task DeleteAttachmentAsync(string id, CancellationToken ct)
+    {
+        using var _ = await SendAuthorizedAsync(HttpMethod.Delete, $"/api/agent/attachment/{Uri.EscapeDataString(id)}", null, ct);
+    }
+
+    public async Task DeleteChatAttachmentsAsync(string chatKey, CancellationToken ct)
+    {
+        using var _ = await SendAuthorizedAsync(HttpMethod.Delete, $"/api/agent/attachment/chat/{Uri.EscapeDataString(chatKey)}", null, ct);
+    }
+
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(HttpMethod method, string url, HttpContent? content, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(method, url) { Content = content };
         var token = await tokenProvider.GetTokenAsync();
         if (!string.IsNullOrWhiteSpace(token))
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        using var res = await httpClient.SendAsync(req, ct);
-        res.EnsureSuccessStatusCode();
-        return await res.Content.ReadFromJsonAsync<AgentStepResponseDto>(cancellationToken: ct);
+        return await httpClient.SendAsync(req, ct);
     }
 }

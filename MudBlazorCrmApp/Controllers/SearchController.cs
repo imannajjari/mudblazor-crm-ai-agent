@@ -17,71 +17,42 @@ public class SearchController(ApplicationDbContext _ctx) : ControllerBase
 
     [HttpGet("")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<SearchResultDto>> Search([FromQuery] string q)
+    public async Task<ActionResult<SearchResultDto>> Search([FromQuery] string q, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
-        {
+        if (string.IsNullOrWhiteSpace(q))
             return Ok(new SearchResultDto());
-        }
 
-        var query = q.ToLower();
+        var query = q.Trim().ToLower();
+        if (query.Length > 100) query = query[..100];
 
         var customers = await ctx.Customer
+            .AsNoTracking()
             .Where(c => c.Name != null && c.Name.ToLower().Contains(query))
             .Take(5)
-            .Select(c => new SearchResultItem
-            {
-                Id = c.Id,
-                Name = c.Name,
-                EntityType = "Customer",
-                Detail = c.Industry
-            })
-            .ToListAsync();
+            .Select(c => new SearchResultItem { Id = c.Id, Name = c.Name, EntityType = "Customer", Detail = c.Industry })
+            .ToListAsync(ct);
 
         var contacts = await ctx.Contact
-            .Where(c => (c.Name != null && c.Name.ToLower().Contains(query)) ||
-                        (c.Email != null && c.Email.ToLower().Contains(query)))
+            .AsNoTracking()
+            .Where(c => (c.Name != null && c.Name.ToLower().Contains(query)) || (c.Email != null && c.Email.ToLower().Contains(query)))
             .Take(5)
-            .Select(c => new SearchResultItem
-            {
-                Id = c.Id,
-                Name = c.Name,
-                EntityType = "Contact",
-                Detail = c.Email
-            })
-            .ToListAsync();
+            .Select(c => new SearchResultItem { Id = c.Id, Name = c.Name, EntityType = "Contact", Detail = c.Email })
+            .ToListAsync(ct);
 
         var opportunities = await ctx.Opportunity
+            .AsNoTracking()
             .Where(o => o.Name != null && o.Name.ToLower().Contains(query))
             .Take(5)
-            .Select(o => new SearchResultItem
-            {
-                Id = o.Id,
-                Name = o.Name,
-                EntityType = "Opportunity",
-                Detail = o.Stage
-            })
-            .ToListAsync();
+            .Select(o => new SearchResultItem { Id = o.Id, Name = o.Name, EntityType = "Opportunity", Detail = o.Stage })
+            .ToListAsync(ct);
 
         var leads = await ctx.Lead
-            .Include(l => l.Contact)
+            .AsNoTracking()
             .Where(l => l.Contact != null && l.Contact.Name != null && l.Contact.Name.ToLower().Contains(query))
             .Take(5)
-            .Select(l => new SearchResultItem
-            {
-                Id = l.Id,
-                Name = l.Contact != null ? l.Contact.Name : "Unknown",
-                EntityType = "Lead",
-                Detail = l.Status
-            })
-            .ToListAsync();
+            .Select(l => new SearchResultItem { Id = l.Id, Name = l.Contact != null ? l.Contact.Name : "Unknown", EntityType = "Lead", Detail = l.Status })
+            .ToListAsync(ct);
 
-        return Ok(new SearchResultDto
-        {
-            Customers = customers,
-            Contacts = contacts,
-            Opportunities = opportunities,
-            Leads = leads
-        });
+        return Ok(new SearchResultDto { Customers = customers, Contacts = contacts, Opportunities = opportunities, Leads = leads });
     }
 }

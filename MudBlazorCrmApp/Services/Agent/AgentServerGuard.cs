@@ -4,54 +4,6 @@ using System.Text.Json.Nodes;
 namespace MudBlazorCrmApp.Services.Agent;
 
 /// <summary>
-/// Validates incoming conversation transcripts and enforces tool_call_id pairing.
-/// </summary>
-public static class AgentTranscriptValidator
-{
-    public static bool TryParseMessages(
-        IReadOnlyList<string>? rawMessages,
-        int maxMessages,
-        out List<JsonObject> parsed)
-    {
-        parsed = [];
-        if (rawMessages == null || rawMessages.Count == 0 || rawMessages.Count > maxMessages)
-            return false;
-
-        var knownToolCallIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var raw in rawMessages)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) return false;
-            JsonNode? node;
-            try { node = JsonNode.Parse(raw); }
-            catch (JsonException) { return false; }
-
-            if (node is not JsonObject obj) return false;
-            var role = obj["role"] is JsonValue rv && rv.TryGetValue<string>(out var rs) ? rs : null;
-            if (role is not ("user" or "assistant" or "tool")) return false;
-
-            if (role == "assistant" && obj["tool_calls"] is JsonArray tcs)
-            {
-                foreach (var tc in tcs)
-                {
-                    var tcId = tc?["id"] is JsonValue tid && tid.TryGetValue<string>(out var tids) ? tids : null;
-                    if (!string.IsNullOrWhiteSpace(tcId)) knownToolCallIds.Add(tcId);
-                }
-            }
-            else if (role == "tool")
-            {
-                var idStr = obj["tool_call_id"] is JsonValue iv && iv.TryGetValue<string>(out var ids) ? ids : null;
-                if (string.IsNullOrWhiteSpace(idStr) || !knownToolCallIds.Contains(idStr))
-                    return false;
-            }
-
-            parsed.Add(obj);
-        }
-
-        return true;
-    }
-}
-
-/// <summary>
 /// Tracks per-task server tool state to block duplicate calls, excessive paging walks,
 /// repeated identical errors, ask_help overuse, and read_data after delete refusal.
 /// </summary>
@@ -96,10 +48,45 @@ public sealed class AgentServerGuard
         for (var i = messages.Count - 1; i >= 0; i--)
         {
             if (TryGetString(messages[i]["role"]) != "user") continue;
-            var content = TryGetString(messages[i]["content"]) ?? "";
-            return content.TrimStart().StartsWith("[how-to question]", StringComparison.OrdinalIgnoreCase);
+            var content = (TryGetString(messages[i]["content"]) ?? "").TrimStart();
+            if (content.StartsWith(AgentKnowledgeWriteGuard.NotesMark, StringComparison.Ordinal) ||
+                content.StartsWith("Relevant CRM Guide Context", StringComparison.Ordinal) ||
+                content.StartsWith("[finish blocked]", StringComparison.OrdinalIgnoreCase) ||
+                content.StartsWith("[loop guard]", StringComparison.OrdinalIgnoreCase) ||
+                content.StartsWith("[final call]", StringComparison.OrdinalIgnoreCase) ||
+                content.StartsWith("Your previous reply was empty", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var goal = ExtractGoalText(content);
+            return goal.StartsWith("[how-to question]", StringComparison.OrdinalIgnoreCase)
+                || goal.StartsWith("how do i ", StringComparison.OrdinalIgnoreCase)
+                || goal.StartsWith("how to ", StringComparison.OrdinalIgnoreCase)
+                || goal.StartsWith("how can i ", StringComparison.OrdinalIgnoreCase)
+                || goal.StartsWith("چطور ", StringComparison.Ordinal)
+                || goal.StartsWith("چگونه ", StringComparison.Ordinal);
         }
         return false;
+    }
+
+    // Client transcripts wrap user tasks as "Goal: [att:...] [Delete task: yes]\n<goal>\nDate: ...".
+    internal static string ExtractGoalText(string content)
+    {
+        if (!content.StartsWith("Goal:", StringComparison.OrdinalIgnoreCase))
+            return content;
+
+        var afterPrefix = content[5..];
+        var dateIdx = afterPrefix.IndexOf("\nDate:", StringComparison.OrdinalIgnoreCase);
+        var body = dateIdx >= 0 ? afterPrefix[..dateIdx] : afterPrefix;
+        foreach (var rawLine in body.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (string.IsNullOrEmpty(line)) continue;
+            if (line.StartsWith("[att:", StringComparison.OrdinalIgnoreCase)) continue;
+            if (line.Equals("[Delete task: yes]", StringComparison.OrdinalIgnoreCase)) continue;
+            return line;
+        }
+        return string.Empty;
     }
 
     public static bool ShouldForceFinalCall(
@@ -201,9 +188,7 @@ public sealed class AgentServerGuard
 
     private void InspectPriorToolResult(string content)
     {
-        if (content.Contains("\"deleteRefused\":true", StringComparison.OrdinalIgnoreCase) ||
-            (content.Contains("\"blocked\":true", StringComparison.OrdinalIgnoreCase) &&
-             content.Contains("delete", StringComparison.OrdinalIgnoreCase)))
+        if (content.Contains("\"deleteRefused\":true", StringComparison.OrdinalIgnoreCase))
         {
             _deleteRefused = true;
         }

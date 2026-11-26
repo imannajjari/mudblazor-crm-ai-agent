@@ -14,6 +14,7 @@ namespace MudBlazorCrmApp.Controllers;
 [ApiController]
 public partial class AgentChatController(
     ApplicationDbContext db,
+    AgentAttachmentService attachmentService,
     IOptions<AgentOptions> optionsAccessor) : ControllerBase
 {
     private const int MaxCombinedTextChars = 3_000_000;
@@ -24,9 +25,29 @@ public partial class AgentChatController(
     [HttpGet("")]
     public async Task<ActionResult<AgentChatListResponse>> ListAsync(CancellationToken ct)
     {
-        if (!optionsAccessor.Value.Enabled) return NotFound();
+        var opts = optionsAccessor.Value;
+        opts.Normalize();
+        if (!opts.Enabled) return NotFound();
 
         var userId = User.GetAgentUserKey();
+        if (opts.HistoryDays > 0)
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-opts.HistoryDays);
+            var expiredChats = await db.AgentChat
+                .Where(c => c.UserId == userId && c.UpdatedDate < cutoff)
+                .ToListAsync(ct);
+            if (expiredChats.Count > 0)
+            {
+                var expiredKeys = expiredChats.Select(c => c.ChatKey).ToList();
+                var expiredTasks = await db.AgentTask
+                    .Where(t => t.UserId == userId && expiredKeys.Contains(t.ChatKey))
+                    .ToListAsync(ct);
+                if (expiredTasks.Count > 0) db.AgentTask.RemoveRange(expiredTasks);
+                db.AgentChat.RemoveRange(expiredChats);
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
         var chats = await db.AgentChat
             .Where(c => c.UserId == userId)
             .OrderByDescending(c => c.UpdatedDate)
@@ -65,13 +86,12 @@ public partial class AgentChatController(
         if (!ChatKeyRegex().IsMatch(chatKey))
             return Ok(new AgentChatSaveResponse("The chat key is not valid."));
 
-        var historyJson = request.HistoryJson ?? "[]";
-        var logJson = request.LogJson ?? "[]";
-        if (historyJson.Length + logJson.Length > MaxCombinedTextChars)
-            return Ok(new AgentChatSaveResponse("The chat is too large to store."));
-
-        var title = (request.Title ?? string.Empty).Trim();
+        var historyJson = AgentAttachmentService.RedactAttachmentBlocks(request.HistoryJson ?? "[]");
+        var logJson = AgentAttachmentService.RedactAttachmentBlocks(request.LogJson ?? "[]");
+        var title = AgentAttachmentService.RedactAttachmentBlocks((request.Title ?? string.Empty).Trim());
         if (title.Length > 200) title = title[..200];
+        if (title.Length + historyJson.Length + logJson.Length > MaxCombinedTextChars)
+            return Ok(new AgentChatSaveResponse("The chat is too large to store."));
 
         var userId = User.GetAgentUserKey();
         var existing = await db.AgentChat
@@ -113,8 +133,10 @@ public partial class AgentChatController(
         if (!ChatKeyRegex().IsMatch(chatKey) || taskSeq < 1)
             return Ok(new AgentChatSaveResponse("The chat key is not valid."));
 
-        var transcriptJson = request.TranscriptJson ?? "[]";
-        if (transcriptJson.Length + (request.Summary?.Length ?? 0) + (request.Goal?.Length ?? 0) > MaxCombinedTextChars)
+        var goal = AgentAttachmentService.RedactAttachmentBlocks(request.Goal ?? string.Empty);
+        var summary = AgentAttachmentService.RedactAttachmentBlocks(request.Summary ?? string.Empty);
+        var transcriptJson = AgentAttachmentService.RedactAttachmentBlocks(request.TranscriptJson ?? "[]");
+        if (transcriptJson.Length + summary.Length + goal.Length > MaxCombinedTextChars)
             return Ok(new AgentChatSaveResponse("The chat is too large to store."));
 
         var userId = User.GetAgentUserKey();
@@ -132,8 +154,8 @@ public partial class AgentChatController(
                 UserId = userId,
                 ChatKey = chatKey,
                 TaskSeq = taskSeq,
-                Goal = request.Goal ?? string.Empty,
-                Summary = request.Summary ?? string.Empty,
+                Goal = goal,
+                Summary = summary,
                 TranscriptJson = transcriptJson,
                 InputTokens = Math.Max(0, request.InputTokens),
                 OutputTokens = Math.Max(0, request.OutputTokens),
@@ -147,8 +169,8 @@ public partial class AgentChatController(
         }
         else
         {
-            existing.Goal = request.Goal ?? string.Empty;
-            existing.Summary = request.Summary ?? string.Empty;
+            existing.Goal = goal;
+            existing.Summary = summary;
             existing.TranscriptJson = transcriptJson;
             existing.InputTokens = Math.Max(0, request.InputTokens);
             existing.OutputTokens = Math.Max(0, request.OutputTokens);
@@ -177,6 +199,7 @@ public partial class AgentChatController(
         if (tasks.Count > 0) db.AgentTask.RemoveRange(tasks);
 
         await db.SaveChangesAsync(ct);
+        attachmentService.DeleteChat(chatKey, userId);
         return Ok(new AgentChatSaveResponse(null));
     }
 

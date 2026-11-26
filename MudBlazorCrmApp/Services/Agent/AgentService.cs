@@ -11,12 +11,16 @@ public sealed class AgentService(
     IEnumerable<IServerToolHandler> serverTools,
     IOptions<AgentOptions> optionsAccessor,
     ILogger<AgentService> logger,
-    AgentHelpLlmAdvisor? helpAdvisor = null)
+    AgentHelpLlmAdvisor? helpAdvisor = null,
+    AgentKnowledgeService? knowledgeService = null,
+    IHttpContextAccessor? httpContextAccessor = null,
+    AgentUsageCounter? usageCounter = null)
 {
-    private const int MaxTranscriptMessages = 200;
+    private const int MaxTranscriptMessages = 400;
     private const int MaxServerHops = 4;
     private const int MaxLookTextChars = 30_000;
     private const int MaxLookQuestionChars = 2_000;
+    private const int MaxLookImageBytes = 4 * 1024 * 1024;
 
     private readonly Dictionary<string, IServerToolHandler> _serverToolMap =
         serverTools.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -34,48 +38,80 @@ public sealed class AgentService(
         if (!rateLimiter.TryAcquire(userKey, options.MaxCallsPerUserPerMinute))
             return new AgentStepResponseModel { Error = "Too many agent requests in a minute. Wait a moment and try again." };
 
+        if (options.MaxStepsPerDay > 0 && !rateLimiter.TryAcquireWindow($"agent_day:{userKey}", options.MaxStepsPerDay, TimeSpan.FromDays(1)))
+            return new AgentStepResponseModel { Error = "Daily agent step limit reached. Try again tomorrow." };
+
         if (!TryParseMessages(request.Messages, out var parsedMessages))
             return new AgentStepResponseModel { Error = "The conversation sent to the agent is not valid." };
 
         var totalUsage = new AgentUsageModel();
+        var httpContext = httpContextAccessor?.HttpContext;
+        var language = httpContext.GetAgentLanguage();
+        var isAdmin = httpContext?.User?.IsInRole("Administrator") == true;
         var isHowTo = AgentServerGuard.IsHowToQuestion(parsedMessages);
-        var systemPrompt = await BuildSystemPromptWithAutoHelpAsync(parsedMessages, isHowTo, totalUsage, options, cancellationToken);
-        var working = new List<JsonObject>(parsedMessages.Count + 1)
+        var (systemPrompt, extraNotes) = await BuildInitialContextAsync(parsedMessages, isHowTo, language, totalUsage, options, cancellationToken);
+        var working = new List<JsonObject>(parsedMessages.Count + extraNotes.Count + 1)
         {
             new() { ["role"] = "system", ["content"] = systemPrompt }
         };
+        var prior = new List<string>();
+        foreach (var note in extraNotes)
+        {
+            var noteMsg = new JsonObject { ["role"] = "user", ["content"] = note };
+            working.Add(noteMsg);
+            prior.Add(noteMsg.ToJsonString());
+        }
         working.AddRange(parsedMessages);
 
-        var prior = new List<string>();
         var timings = new List<string>();
         var guard = AgentServerGuard.FromTranscript(parsedMessages, _serverToolNames);
+        var toolContext = new ServerToolContext(userKey, request.ChatKey ?? string.Empty, language, isAdmin, working);
 
         for (var hop = 0; hop <= MaxServerHops; hop++)
         {
-            var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, prior, timings, cancellationToken);
+            var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, toolContext, prior, timings, cancellationToken);
             if (hopResult != null) return hopResult;
         }
 
+        AccumulateCounter(totalUsage, usageCounter);
         return BuildError(prior, timings, totalUsage, options, "Server tool hop limit reached.");
     }
 
-    private async Task<string> BuildSystemPromptWithAutoHelpAsync(
+    private async Task<(string SystemPrompt, List<string> ExtraUserNotes)> BuildInitialContextAsync(
         IReadOnlyList<JsonObject> parsedMessages,
         bool isHowTo,
+        string language,
         AgentUsageModel totalUsage,
         AgentOptions options,
         CancellationToken ct)
     {
-        if (!isHowTo || parsedMessages.Count != 1 || helpAdvisor == null)
-            return AgentPrompts.MainSystemPrompt;
+        var extraNotes = new List<string>();
+        var lastUser = parsedMessages.Count > 0 && TryGetString(parsedMessages[^1]["role"]) == "user"
+            ? TryGetString(parsedMessages[^1]["content"]) ?? ""
+            : "";
+        var isFirstStepOfTask = parsedMessages.Count == 1 || lastUser.StartsWith("Goal:", StringComparison.OrdinalIgnoreCase);
+        if (!isFirstStepOfTask)
+            return (AgentPrompts.MainSystemPrompt, extraNotes);
 
-        var firstUserMsg = TryGetString(parsedMessages[0]["content"]) ?? "";
-        var (autoHelp, sideUsage) = await helpAdvisor.BuildAutoHelpContextAsync(firstUserMsg, ct);
-        AgentCostCalculator.Compute(sideUsage, options);
-        AgentCostCalculator.Accumulate(totalUsage, sideUsage);
-        return string.IsNullOrWhiteSpace(autoHelp)
-            ? AgentPrompts.MainSystemPrompt
-            : $"{AgentPrompts.MainSystemPrompt}\n\nRelevant CRM Guide Context (auto-retrieved):\n{autoHelp}";
+        var firstUserMsg = AgentServerGuard.ExtractGoalText(lastUser.TrimStart());
+
+        if (isHowTo && helpAdvisor != null)
+        {
+            var (autoHelp, sideUsage) = await helpAdvisor.BuildAutoHelpContextAsync(firstUserMsg, ct);
+            AgentCostCalculator.Compute(sideUsage, options);
+            AgentCostCalculator.Accumulate(totalUsage, sideUsage);
+            if (!string.IsNullOrWhiteSpace(autoHelp))
+                extraNotes.Add($"Relevant CRM Guide Context (auto-retrieved):\n{autoHelp}");
+        }
+
+        if (knowledgeService != null)
+        {
+            var (notes, _) = await knowledgeService.BuildContextNotesAsync(firstUserMsg, language, ct);
+            if (!string.IsNullOrWhiteSpace(notes))
+                extraNotes.Add(notes);
+        }
+
+        return (AgentPrompts.MainSystemPrompt, extraNotes);
     }
 
     private async Task<AgentStepResponseModel?> RunSingleHopAsync(
@@ -86,6 +122,7 @@ public sealed class AgentService(
         bool isHowTo,
         int hop,
         AgentServerGuard guard,
+        ServerToolContext toolContext,
         List<string> prior,
         List<string> timings,
         CancellationToken cancellationToken)
@@ -108,24 +145,44 @@ public sealed class AgentService(
         AgentCostCalculator.Compute(llmResult.Usage, options);
         AgentCostCalculator.Accumulate(totalUsage, llmResult.Usage);
 
-        if (llmResult.Error != null) return BuildError(prior, timings, totalUsage, options, llmResult.Error);
-        if (string.IsNullOrWhiteSpace(llmResult.AssistantJson)) return BuildError(prior, timings, totalUsage, options, "Assistant returned an empty response.");
+        if (llmResult.Error != null)
+        {
+            AccumulateCounter(totalUsage, usageCounter);
+            return BuildError(prior, timings, totalUsage, options, llmResult.Error);
+        }
+        if (string.IsNullOrWhiteSpace(llmResult.AssistantJson))
+        {
+            AccumulateCounter(totalUsage, usageCounter);
+            return BuildError(prior, timings, totalUsage, options, "Assistant returned an empty response.");
+        }
 
         if (!TryParseAssistantObject(llmResult.AssistantJson, out var assistantObj, out var parseErr))
+        {
+            AccumulateCounter(totalUsage, usageCounter);
             return BuildError(prior, timings, totalUsage, options, parseErr!);
+        }
 
         var toolCalls = assistantObj!["tool_calls"]?.AsArray();
         if (isFinalCall || toolCalls == null || toolCalls.Count == 0)
+        {
+            AccumulateCounter(totalUsage, usageCounter);
             return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
+        }
 
         var hasServerTool = toolCalls.Any(tc => _serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
         var hasUiTool = toolCalls.Any(tc => !_serverToolMap.ContainsKey(TryGetString(tc?["function"]?["name"]) ?? ""));
         if (!hasServerTool)
+        {
+            AccumulateCounter(totalUsage, usageCounter);
             return BuildSuccess(llmResult.AssistantJson, prior, [], timings, totalUsage, options);
+        }
 
-        var serverResults = await RunServerToolBatchAsync(toolCalls, guard, timings, cancellationToken);
+        var serverResults = await RunServerToolBatchAsync(toolCalls, guard, toolContext, timings, cancellationToken);
         if (hasUiTool || hop == MaxServerHops)
+        {
+            AccumulateCounter(totalUsage, usageCounter);
             return BuildSuccess(llmResult.AssistantJson, prior, serverResults, timings, totalUsage, options);
+        }
 
         working.Add(assistantObj);
         prior.Add(llmResult.AssistantJson);
@@ -158,6 +215,7 @@ public sealed class AgentService(
     private async Task<List<string>> RunServerToolBatchAsync(
         JsonArray toolCalls,
         AgentServerGuard guard,
+        ServerToolContext toolContext,
         List<string> timings,
         CancellationToken ct)
     {
@@ -170,7 +228,7 @@ public sealed class AgentService(
             var callId = TryGetString(tc?["id"]) ?? Guid.NewGuid().ToString("N");
             var argsRaw = TryGetString(tc?["function"]?["arguments"]) ?? "{}";
             var sw = Stopwatch.StartNew();
-            var resultJson = await ExecuteServerToolAsync(handler, argsRaw, guard, ct);
+            var resultJson = await ExecuteServerToolAsync(handler, argsRaw, guard, toolContext, ct);
             sw.Stop();
             timings.Add($"{fnName} {sw.ElapsedMilliseconds} ms");
 
@@ -188,6 +246,7 @@ public sealed class AgentService(
         IServerToolHandler handler,
         string argsRaw,
         AgentServerGuard guard,
+        ServerToolContext toolContext,
         CancellationToken ct)
     {
         JsonDocument argsDoc;
@@ -204,7 +263,7 @@ public sealed class AgentService(
         var blocked = guard.CheckBeforeExecute(handler.Name, argsRaw, argsDoc.RootElement);
         if (blocked != null) return blocked;
 
-        var result = await handler.ExecuteAsync(argsDoc.RootElement, ct);
+        var result = await handler.ExecuteAsync(argsDoc.RootElement, toolContext, ct);
         return guard.RecordAndCheckError(handler.Name, result);
     }
 
@@ -216,23 +275,59 @@ public sealed class AgentService(
         var options = optionsAccessor.Value;
         options.Normalize();
 
-        if (!rateLimiter.TryAcquire(userKey, options.MaxCallsPerUserPerMinute))
+        if (!rateLimiter.TryAcquire($"look:{userKey}", options.MaxCallsPerUserPerMinute))
             return new AgentLookResponseModel { Error = "Too many agent requests in a minute. Wait a moment and try again." };
 
         if (string.IsNullOrWhiteSpace(request.Question) || request.Question.Length > MaxLookQuestionChars)
             return new AgentLookResponseModel { Error = "The question is empty or too long." };
 
-        if (string.IsNullOrWhiteSpace(request.Text))
-            return new AgentLookResponseModel { Error = "Visible screen text is required." };
+        if (string.IsNullOrWhiteSpace(request.Text) && string.IsNullOrWhiteSpace(request.Image))
+            return new AgentLookResponseModel { Error = "Visible screen text or image is required." };
 
-        var screenText = request.Text.Length > MaxLookTextChars ? request.Text[..MaxLookTextChars] : request.Text;
+        if (!string.IsNullOrEmpty(request.Text) && request.Text.Length > MaxLookTextChars)
+            return new AgentLookResponseModel { Error = "Visible screen text is too long." };
+
+        var userContent = new JsonArray();
+        var screenText = request.Text ?? "";
+        userContent.Add(new JsonObject { ["type"] = "text", ["text"] = $"Question: {request.Question}\n\nVisible screen text:\n{screenText}" });
+
+        if (!string.IsNullOrWhiteSpace(request.Image))
+        {
+            if (!options.Vision)
+                return new AgentLookResponseModel { Error = "Vision mode is disabled." };
+
+            var mediaType = string.IsNullOrWhiteSpace(request.MediaType) ? "image/png" : request.MediaType.Trim().ToLowerInvariant();
+            if (mediaType is not ("image/png" or "image/jpeg"))
+                return new AgentLookResponseModel { Error = "Only PNG and JPEG images are supported." };
+
+            byte[] imageBytes;
+            try
+            {
+                imageBytes = Convert.FromBase64String(request.Image);
+            }
+            catch (FormatException)
+            {
+                return new AgentLookResponseModel { Error = "Invalid base64 image payload." };
+            }
+
+            if (imageBytes.Length == 0 || imageBytes.Length > MaxLookImageBytes)
+                return new AgentLookResponseModel { Error = "Image size exceeds the 4 MB limit." };
+
+            userContent.Add(new JsonObject
+            {
+                ["type"] = "image_url",
+                ["image_url"] = new JsonObject { ["url"] = $"data:{mediaType};base64,{request.Image}" }
+            });
+        }
+
         var messages = new List<JsonObject>
         {
             new() { ["role"] = "system", ["content"] = AgentPrompts.LookSystemPrompt },
-            new() { ["role"] = "user", ["content"] = $"Question: {request.Question}\n\nVisible screen text:\n{screenText}" }
+            new() { ["role"] = "user", ["content"] = string.IsNullOrWhiteSpace(request.Image) ? (JsonNode)JsonValue.Create($"Question: {request.Question}\n\nVisible screen text:\n{screenText}")! : userContent }
         };
 
-        var result = await provider.CompleteAsync(messages, tools: null, cancellationToken);
+        var modelOverride = string.IsNullOrWhiteSpace(request.Image) ? null : options.VisionModel;
+        var result = await provider.CompleteAsync(messages, tools: null, modelOverride, cancellationToken);
         AgentCostCalculator.Compute(result.Usage, options);
         if (result.Error != null)
             return new AgentLookResponseModel { Error = result.Error, Usage = result.Usage };
@@ -260,6 +355,12 @@ public sealed class AgentService(
 
     private static string? TryGetString(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private static void AccumulateCounter(AgentUsageModel total, AgentUsageCounter? counter)
+    {
+        if (counter != null && counter.Total.Calls > 0)
+            AgentCostCalculator.Accumulate(total, counter.Total);
+    }
 
     private static AgentStepResponseModel BuildSuccess(string assistant, List<string> prior, List<string> serverResults, List<string> timings, AgentUsageModel usage, AgentOptions options) =>
         new() { Assistant = assistant, Prior = prior, ServerToolResults = serverResults, Timings = timings, Usage = usage, MaxTaskCostUsd = options.MaxTaskCostUsd, MaxTaskModelCalls = options.MaxTaskModelCalls };

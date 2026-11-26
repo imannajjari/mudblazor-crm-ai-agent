@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace MudBlazorCrmApp.Services.Agent;
@@ -6,6 +7,7 @@ namespace MudBlazorCrmApp.Services.Agent;
 public interface IAgentRateLimiter
 {
     bool TryAcquire(string userKey, int limitPerMinute);
+    bool TryAcquireWindow(string key, int limit, TimeSpan window) => TryAcquire(key, limit);
 }
 
 public interface IAgentDataReader
@@ -21,31 +23,68 @@ public interface IAgentHelpCatalog
     HelpSearchHit? GetPage(string titleQuery);
 }
 
+public sealed record ServerToolContext(
+    string UserKey,
+    string ChatKey,
+    string Language,
+    bool IsAdmin,
+    IReadOnlyList<JsonObject> Transcript);
+
 public interface IServerToolHandler
 {
     string Name { get; }
-    Task<string> ExecuteAsync(JsonElement args, CancellationToken ct);
+    Task<string> ExecuteAsync(JsonElement args, ServerToolContext ctx, CancellationToken ct);
+}
+
+/// <summary>
+/// Request-scoped accumulator for main and side-call LLM token usage and cost.
+/// </summary>
+public sealed class AgentUsageCounter
+{
+    private int _callsWithoutCost;
+    public AgentUsageModel Total { get; } = new();
+
+    public void Add(AgentUsageModel add)
+    {
+        Total.InputTokens += Math.Max(0, add.InputTokens);
+        Total.OutputTokens += Math.Max(0, add.OutputTokens);
+        Total.CachedInputTokens += Math.Max(0, add.CachedInputTokens);
+        Total.Calls += Math.Max(0, add.Calls);
+        if (add.Cost.HasValue)
+        {
+            if (_callsWithoutCost == 0)
+                Total.Cost = (Total.Cost ?? 0m) + add.Cost.Value;
+        }
+        else if (add.Calls > 0)
+        {
+            _callsWithoutCost += add.Calls;
+            Total.Cost = null;
+        }
+    }
 }
 
 public sealed class MemoryCacheRateLimiter(IMemoryCache cache) : IAgentRateLimiter
 {
-    public bool TryAcquire(string userKey, int limitPerMinute)
+    public bool TryAcquire(string userKey, int limitPerMinute) =>
+        TryAcquireWindow($"agent_rl:{userKey}", limitPerMinute, TimeSpan.FromMinutes(1));
+
+    public bool TryAcquireWindow(string key, int limit, TimeSpan window)
     {
-        var lazyQueue = cache.GetOrCreate($"agent_rl:{userKey}", entry =>
+        var lazyQueue = cache.GetOrCreate(key, entry =>
         {
-            entry.SlidingExpiration = TimeSpan.FromMinutes(5);
+            entry.SlidingExpiration = window > TimeSpan.FromMinutes(5) ? window : TimeSpan.FromMinutes(5);
             return new Lazy<Queue<DateTimeOffset>>(() => new Queue<DateTimeOffset>());
         })!;
 
         var queue = lazyQueue.Value;
         var now = DateTimeOffset.UtcNow;
-        var cutoff = now.AddMinutes(-1);
+        var cutoff = now - window;
         lock (queue)
         {
             while (queue.Count > 0 && queue.Peek() < cutoff)
                 queue.Dequeue();
 
-            if (queue.Count >= limitPerMinute)
+            if (queue.Count >= limit)
                 return false;
 
             queue.Enqueue(now);

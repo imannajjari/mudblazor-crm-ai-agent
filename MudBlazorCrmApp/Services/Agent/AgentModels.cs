@@ -52,4 +52,5 @@ public class AgentStatusModel
     public int MaxTaskModelCalls { get; set; } = 40;
     public decimal MaxTaskCostUsd { get; set; } = 0.80m;
     public bool ShowCost { get; set; } = true;
+    public bool Vision { get; set; } = true;
 }

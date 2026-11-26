@@ -19,23 +19,47 @@ public sealed class AgentUiToolDispatcher(
     ILogger<AgentUiToolDispatcher> logger) : IAgentUiHost
 {
     private const string LookEndpoint = "/api/agent/look";
+    private const string AttachmentEndpoint = "/api/agent/attachment/";
     private static readonly JsonSerializerOptions CaseInsensitiveJson = new() { PropertyNameCaseInsensitive = true };
-    private static readonly HashSet<string> BlockedRoutes = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly string[] BlockedRoutePrefixes =
+    [
+        "/logout", "/account", "/login", "/register", "/user", "/auditlog", "/import", "/emailtemplate"
+    ];
+
+    public static bool IsBlockedRoute(string? route)
     {
-        "/logout", "/account/changepassword", "/login", "/register", "/user"
-    };
+        if (string.IsNullOrWhiteSpace(route)) return false;
+        var norm = NormalizeRoutePath(route);
+        return BlockedRoutePrefixes.Any(prefix =>
+            string.Equals(norm, prefix, StringComparison.OrdinalIgnoreCase) ||
+            norm.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase));
+    }
 
     private readonly Dictionary<string, IUiToolHandler> _handlerMap =
         handlers.ToDictionary(h => h.ToolName, StringComparer.Ordinal);
     private readonly AgentSafetyState _safety = new();
 
-    public void ResetSafety() => _safety.Reset();
+    public void ResetSafety(bool isDeleteGoal = false, bool hasAttachments = false, bool adviceOnlyGoal = false)
+    {
+        _safety.Reset();
+        _safety.DeleteTaskRequested = isDeleteGoal;
+        _safety.HasAttachmentsInTask = hasAttachments;
+        _adviceOnlyGoal = adviceOnlyGoal;
+    }
 
-    public async Task<string> CaptureSnapshotAsync(CancellationToken ct = default)
+    private bool _adviceOnlyGoal;
+    public bool IsVisionEnabled { get; set; } = true;
+    public void ResetSafety() => ResetSafety(false, false, false);
+    public void MarkRecordRead() => _safety.MarkRead();
+    public string? CheckFinishAllowed() => _safety.CheckFinishOrNavAllowed();
+
+    public Task<string> CaptureSnapshotAsync(CancellationToken ct = default) => CaptureSnapshotAsync(15, ct);
+
+    public async Task<string> CaptureSnapshotAsync(int maxRows, CancellationToken ct = default)
     {
         try
         {
-            return await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureSnapshot", ct);
+            return await jsRuntime.InvokeAsync<string>("crmAgentDriver.captureSnapshot", ct, maxRows);
         }
         catch (Exception ex)
         {
@@ -51,7 +75,7 @@ public sealed class AgentUiToolDispatcher(
         AgentMode mode,
         List<string> ledger,
         Func<string, string, CancellationToken, Task<PermissionDecision>> askPermissionAsync,
-        Func<string, CancellationToken, Task<string>> askUserAsync,
+        Func<string, string[]?, CancellationToken, Task<string>> askUserAsync,
         Func<int, int, int, int, decimal?, Task> onLookUsageAsync,
         CancellationToken ct)
     {
@@ -83,6 +107,12 @@ public sealed class AgentUiToolDispatcher(
         }
     }
 
+    public async Task ClearPanelStateAsync(CancellationToken ct = default)
+    {
+        try { await jsRuntime.InvokeVoidAsync("crmAgentDriver.clearPanelState", ct, "crm_agent_panel_state"); }
+        catch (Exception ex) { logger.LogDebug(ex, "clearPanelState failed."); }
+    }
+
     public Task<string> InvokeDriverStringAsync(string fn, CancellationToken ct, params object?[] args) =>
         jsRuntime.InvokeAsync<string>($"crmAgentDriver.{fn}", ct, args).AsTask();
 
@@ -91,11 +121,22 @@ public sealed class AgentUiToolDispatcher(
 
     public void NavigateTo(string route) => navigationManager.NavigateTo(route);
     public string Translate(string key) => appText[key];
+    public string LookupTerm(string term) => appText.LookupTerm(term);
+
+    public async Task<AttachmentDownloadDto?> GetAttachmentAsync(string id, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, AttachmentEndpoint + Uri.EscapeDataString(id));
+        var token = await tokenProvider.GetTokenAsync();
+        if (!string.IsNullOrWhiteSpace(token)) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var res = await httpClient.SendAsync(req, ct);
+        if (!res.IsSuccessStatusCode) return null;
+        return await res.Content.ReadFromJsonAsync<AttachmentDownloadDto>(CaseInsensitiveJson, ct);
+    }
 
     public Task<(bool Allowed, string? BlockReason)> AuthorizeAsync(
         AgentMode mode, string route, bool inDialog, string actionText, string risk, string targetName,
         string snapshotJson, Func<string, string, CancellationToken, Task<PermissionDecision>> askPermissionAsync, CancellationToken ct) =>
-        permissionGate.AuthorizeAsync(mode, route, inDialog, actionText, risk, targetName, snapshotJson, askPermissionAsync, ct);
+        permissionGate.AuthorizeAsync(mode, route, inDialog, actionText, risk, targetName, snapshotJson, askPermissionAsync, ct, _adviceOnlyGoal);
 
     public static string NormalizeRoutePath(string href)
     {
@@ -107,9 +148,9 @@ public sealed class AgentUiToolDispatcher(
     public static (string? Route, NavRouteDto[] Available) MatchRoute(string input, NavRouteDto[] routes)
     {
         var key = input.Trim();
-        var available = routes.Where(r => !BlockedRoutes.Contains(NormalizeRoutePath(r.Href))).ToArray();
+        var available = routes.Where(r => !IsBlockedRoute(r.Href)).ToArray();
         if (string.IsNullOrEmpty(key) || key.StartsWith("//")) return (null, available);
-        if (key.StartsWith('/') && BlockedRoutes.Contains(NormalizeRoutePath(key))) return (null, available);
+        if (key.StartsWith('/') && IsBlockedRoute(key)) return (null, available);
 
         var keyStem = key.TrimStart('/').TrimEnd('s', 'S');
         var match = available.FirstOrDefault(r =>
@@ -122,7 +163,7 @@ public sealed class AgentUiToolDispatcher(
                 r.Href.TrimStart('/').Contains(keyStem, StringComparison.OrdinalIgnoreCase) ||
                 keyStem.Contains(r.Href.TrimStart('/').TrimEnd('s', 'S'), StringComparison.OrdinalIgnoreCase));
 
-        if (match == null || BlockedRoutes.Contains(NormalizeRoutePath(match.Href))) return (null, available);
+        if (match == null || IsBlockedRoute(match.Href)) return (null, available);
         return (match.Href, available);
     }
 
@@ -146,9 +187,15 @@ public sealed class AgentUiToolDispatcher(
         }
     }
 
-    public async Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct)
+    public async Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct) =>
+        await PostLookAsync(text, question, null, null, ct);
+
+    public async Task<LookResponseDto?> PostLookAsync(string text, string question, string? image, string? mediaType, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, LookEndpoint) { Content = JsonContent.Create(new { text, question }) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, LookEndpoint)
+        {
+            Content = JsonContent.Create(new { text, question, image, mediaType })
+        };
         var token = await tokenProvider.GetTokenAsync();
         if (!string.IsNullOrWhiteSpace(token)) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var res = await httpClient.SendAsync(req, ct);
@@ -194,6 +241,24 @@ public sealed class AgentUiToolDispatcher(
         }
         catch (JsonException ex) { logger.LogDebug(ex, "Failed to look up action {ActionId}.", id); }
         return (id, "save");
+    }
+
+    public string LookupFieldLabel(string snapshotJson, string id)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            if (doc.RootElement.TryGetProperty("fields", out var fieldsEl) && fieldsEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var f in fieldsEl.EnumerateArray())
+                {
+                    if (f.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String && idEl.GetString() == id)
+                        return f.TryGetProperty("label", out var l) && l.ValueKind == JsonValueKind.String ? l.GetString() ?? id : id;
+                }
+            }
+        }
+        catch (JsonException ex) { logger.LogDebug(ex, "Failed to look up field {FieldId}.", id); }
+        return id;
     }
 
     public bool EvaluateSaveIncomplete(string clickResultJson, string snapshotJson, bool wasInDialog, string risk)

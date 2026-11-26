@@ -44,7 +44,8 @@ public sealed class AgentPermissionGate
         string? targetName,
         string snapshotJson,
         Func<string, string, CancellationToken, Task<PermissionDecision>> promptAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool adviceOnlyGoal = false)
     {
         var scopeKey = $"{route}|{inDialog}|{actionText}";
         if (_declined.Contains(scopeKey))
@@ -54,11 +55,13 @@ public sealed class AgentPermissionGate
             return (false, "Destructive action requires an explicit targetName present on screen.");
 
         var effectiveRisk = risk == "confirm" ? "save" : risk;
+        var allowAutoBypass = mode == AgentMode.Auto && !adviceOnlyGoal;
         var needsPrompt = risk is "destructive" or "confirm" || effectiveRisk switch
         {
             "read" => false,
-            "save" or "write" => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey),
-            _ => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey) // Fail closed for unknown risk classifications
+            "light" or "export" => mode == AgentMode.Manual && !_alwaysAllowed.Contains(scopeKey),
+            "save" or "write" => !allowAutoBypass && !_alwaysAllowed.Contains(scopeKey),
+            _ => !allowAutoBypass && !_alwaysAllowed.Contains(scopeKey)
         };
 
         if (!needsPrompt)
@@ -72,7 +75,7 @@ public sealed class AgentPermissionGate
             return (false, $"User declined '{label}'. Do not retry.");
         }
 
-        if (decision == PermissionDecision.AllowAlways && effectiveRisk != "destructive")
+        if (decision == PermissionDecision.AllowAlways && effectiveRisk is "light" or "export")
             _alwaysAllowed.Add(scopeKey);
         if (effectiveRisk == "destructive" && !string.IsNullOrWhiteSpace(targetName))
             _approvedDestructiveTargets.Add($"{route}|{targetName.Trim()}");

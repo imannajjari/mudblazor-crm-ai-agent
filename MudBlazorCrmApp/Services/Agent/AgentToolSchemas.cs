@@ -8,7 +8,9 @@ public static class AgentToolSchemas
     private static readonly JsonElement[] HowToTools = Phase3Tools
         .Where(t => t.TryGetProperty("function", out var fn) &&
                     fn.TryGetProperty("name", out var n) &&
-                    n.GetString() is "ask_help" or "get_help_page" or "finish")
+                    n.GetString() is "read_data" or "ask_help" or "get_help_page"
+                        or "lookup_term" or "ask_knowledge" or "scan_menus" or "search_settings"
+                        or "list_attachments" or "read_attachment" or "ask_attachment" or "finish")
         .ToArray();
 
     public static JsonElement[] GetTools() => Phase3Tools;
@@ -71,7 +73,37 @@ public static class AgentToolSchemas
             "type": "function",
             "function": {
               "name": "scan_screen",
-              "description": "Read a fresh JSON snapshot of the current screen (fields, grids, tabs, actions, dialog state, errors).",
+              "description": "Read a fresh JSON snapshot of the current screen (fields, fileInputs, grids, tabs, actions, dialog state, errors).",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "rows": { "type": "integer", "description": "Optional max grid rows per table (1-50, default 15)." }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "scan_menus",
+              "description": "List available navigation menu routes and visible toolbar menu items.",
+              "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "scan_tabs",
+              "description": "List tabs on the current screen or active dialog with active/error flags.",
+              "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "scan_context_menu",
+              "description": "Read items of an open right-click / context menu popover.",
               "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
             }
           },
@@ -135,11 +167,14 @@ public static class AgentToolSchemas
             "type": "function",
             "function": {
               "name": "pick_option",
-              "description": "Pick an option from an open combo dropdown by its 1-based index or exact text.",
+              "description": "Pick one or multiple options from an open combo dropdown by 1-based index or exact text.",
               "parameters": {
                 "type": "object",
-                "properties": { "option": { "type": "string" } },
-                "required": ["option"],
+                "properties": {
+                  "option": { "type": "string" },
+                  "multiSelect": { "type": "boolean" },
+                  "options": { "type": "array", "items": { "type": "string" } }
+                },
                 "additionalProperties": false
               }
             }
@@ -196,13 +231,95 @@ public static class AgentToolSchemas
           {
             "type": "function",
             "function": {
+              "name": "clear_filters",
+              "description": "Clear active search/filter inputs on the current grid or restore previously cleared filters.",
+              "parameters": {
+                "type": "object",
+                "properties": { "restore": { "type": "boolean" } },
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "scroll_grid",
+              "description": "Scroll the visible grid container up, down, top, or bottom and refresh snapshot.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "direction": { "type": "string", "enum": ["down", "up", "top", "bottom"] }
+                },
+                "required": ["direction"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "select_tree_node",
+              "description": "Click/select a visible treeview node by its label.",
+              "parameters": {
+                "type": "object",
+                "properties": { "label": { "type": "string" } },
+                "required": ["label"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_settings",
+              "description": "Search navigation routes, tabs, fields, and actions by keyword.",
+              "parameters": {
+                "type": "object",
+                "properties": { "query": { "type": "string" } },
+                "required": ["query"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "sort_grid",
+              "description": "Sort the visible grid by a column header name.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "column": { "type": "string" },
+                  "direction": { "type": "string", "enum": ["asc", "desc"] }
+                },
+                "required": ["column"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "right_click",
+              "description": "Right-click a grid row (rowId) or action/element (id) to open its context menu.",
+              "parameters": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
               "name": "look_at_screen",
               "description": "Read visible screen text when the compact snapshot lacks details.",
               "parameters": {
                 "type": "object",
                 "properties": {
                   "question": { "type": "string" },
-                  "mode": { "type": "string", "enum": ["text"] }
+                  "mode": { "type": "string", "enum": ["text", "picture"] }
                 },
                 "required": ["question"],
                 "additionalProperties": false
@@ -229,8 +346,164 @@ public static class AgentToolSchemas
               "description": "Ask the user one short clarifying question when a required value or choice is missing.",
               "parameters": {
                 "type": "object",
+                "properties": {
+                  "question": { "type": "string" },
+                  "options": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["question"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "remember",
+              "description": "Save a short verified UI fact (12-300 chars) to the shared knowledge base.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "topic": { "type": "string" },
+                  "fact": { "type": "string" }
+                },
+                "required": ["topic", "fact"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "ask_knowledge",
+              "description": "Query the shared knowledge base for verified UI facts.",
+              "parameters": {
+                "type": "object",
                 "properties": { "question": { "type": "string" } },
                 "required": ["question"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "correct_fact",
+              "description": "Correct a previously shown knowledge fact by fact_id with a reason (>=10 chars).",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "fact_id": { "type": "integer" },
+                  "fact": { "type": "string" },
+                  "reason": { "type": "string" }
+                },
+                "required": ["fact_id", "fact", "reason"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "delete_fact",
+              "description": "Delete a previously shown knowledge fact by fact_id with a reason (>=10 chars).",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "fact_id": { "type": "integer" },
+                  "reason": { "type": "string" }
+                },
+                "required": ["fact_id", "reason"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "fact_did_not_help",
+              "description": "Report that a shown knowledge fact_id did not help on this screen.",
+              "parameters": {
+                "type": "object",
+                "properties": { "fact_id": { "type": "integer" } },
+                "required": ["fact_id"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_attachments",
+              "description": "List attached files for the current chat.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_attachment",
+              "description": "Read paged rows or text from an attached file.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "sheet": { "type": "string" },
+                  "fromRow": { "type": "integer" },
+                  "rowCount": { "type": "integer" }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "ask_attachment",
+              "description": "Ask a question about an attached file.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "question": { "type": "string" }
+                },
+                "required": ["id", "question"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "upload_file_to_screen",
+              "description": "Upload a user-attached file into a file input on the current screen.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "attachmentId": { "type": "string" }
+                },
+                "required": ["id", "attachmentId"],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "run_business_action",
+              "description": "Execute a registered CRM business workflow action (e.g., open_pipeline_summary, open_overdue_tasks).",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "action": { "type": "string" }
+                },
+                "required": ["action"],
                 "additionalProperties": false
               }
             }
