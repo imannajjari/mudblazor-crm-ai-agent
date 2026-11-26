@@ -72,7 +72,7 @@
                             <div class="d-flex flex-wrap justify-center gap-1 my-1">
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("تعداد کل مشتریان چقدره؟"))">تعداد مشتریان</MudChip>
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("وضعیت فروش و فرصت‌ها چطوره؟"))">گزارش فروش</MudChip>
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("[how-to question] چطور مشتری جدید ثبت کنم؟"))">راهنمای ثبت مشتری</MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("چطور مشتری جدید ثبت کنم؟"))">راهنمای ثبت مشتری</MudChip>
                             </div>
                             <div class="agent-composer" style="width:100%;">
                                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
@@ -125,9 +125,10 @@
                                 }
                                 else if (entry.Kind == "tool")
                                 {
-                                    <div class="agent-tool-pill align-self-start" title="@entry.Text">
+                                    var displayTool = entry.Text.StartsWith("finish(", StringComparison.Ordinal) ? "finish" : entry.Text;
+                                    <div class="agent-tool-pill align-self-end" title="@entry.Text">
                                         <span>⚙</span>
-                                        <span style="overflow:hidden;text-overflow:ellipsis;">@entry.Text</span>
+                                        <span style="overflow:hidden;text-overflow:ellipsis;">@displayTool</span>
                                     </div>
                                 }
                                 else if (entry.Kind == "question")
