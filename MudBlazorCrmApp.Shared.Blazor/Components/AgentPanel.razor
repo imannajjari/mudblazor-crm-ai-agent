@@ -20,9 +20,11 @@
         <ErrorBoundary>
             <ChildContent>
                 <MudStack Style="height:100%;" Spacing="0" data-agent-panel="true">
-                    <MudToolBar Dense="true" Class="px-3 border-b agent-drag-handle" data-testid="agent-drag-handle">
-                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Color="Color.Primary" Class="me-2" />
-                        <MudText Typo="Typo.subtitle1"><b>@L["AGENT_TITLE"]</b></MudText>
+                    <MudToolBar Dense="true" Class="px-3 agent-drag-handle" data-testid="agent-drag-handle">
+                        <div style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--mud-palette-primary) 16%, transparent);" class="me-2">
+                            <MudIcon Icon="@AgentIcons.CopilotSvg" Color="Color.Primary" Size="Size.Small" />
+                        </div>
+                        <MudText Typo="Typo.subtitle2"><b>@L["AGENT_TITLE"]</b></MudText>
                         <MudSpacer />
                         <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small" OnClick="ToggleHistory" title="@L["AGENT_HISTORY"]" data-testid="agent-history-btn" />
                         <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small" OnClick="@(async () => { _showHistory = false; await Agent.NewChatAsync(); })" title="@L["AGENT_NEW_CHAT"]" data-testid="agent-new-chat" />
@@ -59,29 +61,35 @@
                     }
                     else if (isEmptyCenter)
                     {
-                        <div style="flex:1;overflow-y:auto;padding:24px;" class="d-flex flex-column justify-center align-center gap-4">
-                            <MudIcon Icon="@Icons.Material.Filled.SmartToy" Color="Color.Primary" Style="font-size:48px;" />
-                            <MudText Typo="Typo.h6" Align="Align.Center">@L["AGENT_TITLE"]</MudText>
+                        <div style="flex:1;overflow-y:auto;padding:24px;" class="d-flex flex-column justify-center align-center gap-3">
+                            <div class="agent-hero-badge">
+                                <MudIcon Icon="@AgentIcons.CopilotSvg" Size="Size.Large" Style="color:#fff;" />
+                            </div>
+                            <MudText Typo="Typo.h6" Align="Align.Center"><b>@L["AGENT_TITLE"]</b></MudText>
                             <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Style="max-width:340px;">
                                 @L["AGENT_EMPTY_STATE"]
                             </MudText>
-                            <div style="width:100%;">
+                            <div class="d-flex flex-wrap justify-center gap-1 my-1">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("تعداد کل مشتریان چقدره؟"))">تعداد مشتریان</MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("وضعیت فروش و فرصت‌ها چطوره؟"))">گزارش فروش</MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("[how-to question] چطور مشتری جدید ثبت کنم؟"))">راهنمای ثبت مشتری</MudChip>
+                            </div>
+                            <div class="agent-composer" style="width:100%;">
                                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                                     <MudTextField @bind-Value="_taskInput"
                                                   Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
-                                                  Variant="Variant.Outlined"
+                                                  Variant="Variant.Text"
                                                   Margin="Margin.Dense"
+                                                  Underline="false"
                                                   Disabled="@Agent.IsRunning"
                                                   Immediate="true"
                                                   OnKeyDown="OnTaskKeyDown"
                                                   data-testid="agent-input"
                                                   Style="flex:1;" />
-                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" data-testid="agent-send">
-                                        @L["AGENT_SEND"]
-                                    </MudButton>
+                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
                                 </MudStack>
-                                <div class="mt-2 d-flex justify-start">
-                                    <MudSelect T="AgentMode" @bind-Value="Agent.Mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:190px;" data-testid="agent-mode">
+                                <div class="mt-2 pt-2 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
+                                    <MudSelect T="AgentMode" @bind-Value="Agent.Mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Text" Underline="false" Style="max-width:190px;font-size:12px;" data-testid="agent-mode">
                                         <MudSelectItem Value="AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</MudSelectItem>
                                         <MudSelectItem Value="AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</MudSelectItem>
                                         <MudSelectItem Value="AgentMode.Auto">@L["AGENT_MODE_AUTO"]</MudSelectItem>
@@ -105,21 +113,22 @@
                             {
                                 @if (entry.Kind == "user")
                                 {
-                                    <MudPaper Class="pa-2 mud-theme-primary align-self-end" Style="max-width:85%;border-radius:10px;">
-                                        <MudText Typo="Typo.body2">@entry.Text</MudText>
+                                    <MudPaper Class="pa-2 px-3 align-self-end agent-bubble-user" Elevation="0">
+                                        <MudText Typo="Typo.body2" Style="color:#fff;">@entry.Text</MudText>
                                     </MudPaper>
                                 }
                                 else if (entry.Kind == "assistant")
                                 {
-                                    <MudPaper Class="pa-3 align-self-start" Outlined="true" Style="max-width:95%;border-radius:10px;word-break:break-word;">
-                                        <div class="mud-typography mud-typography-body2" style="line-height:1.6;">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(entry.Text))</div>
+                                    <MudPaper Class="pa-3 align-self-start agent-bubble-assistant" Elevation="0" Style="word-break:break-word;">
+                                        <div class="mud-typography mud-typography-body2" style="line-height:1.65;">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(entry.Text))</div>
                                     </MudPaper>
                                 }
                                 else if (entry.Kind == "tool")
                                 {
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-family:monospace;direction:ltr;text-align:left;">
-                                        ⚙ @entry.Text
-                                    </MudText>
+                                    <div class="agent-tool-pill align-self-start" title="@entry.Text">
+                                        <span>⚙</span>
+                                        <span style="overflow:hidden;text-overflow:ellipsis;">@entry.Text</span>
+                                    </div>
                                 }
                                 else if (entry.Kind == "question")
                                 {
@@ -199,35 +208,34 @@
                         }
                         else
                         {
-                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                                <MudTextField @bind-Value="_taskInput"
-                                              Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
-                                              Variant="Variant.Outlined"
-                                              Margin="Margin.Dense"
-                                              Disabled="@Agent.IsRunning"
-                                              Immediate="true"
-                                              OnKeyDown="OnTaskKeyDown"
-                                              data-testid="agent-input"
-                                              Style="flex:1;" />
-                                @if (Agent.IsRunning)
-                                {
-                                    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="@(() => Agent.Stop())" data-testid="agent-stop">
-                                        @L["AGENT_STOP"]
-                                    </MudButton>
-                                }
-                                else
-                                {
-                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" data-testid="agent-send">
-                                        @L["AGENT_SEND"]
-                                    </MudButton>
-                                }
-                            </MudStack>
-                            <div class="mt-2 d-flex justify-start">
-                                <MudSelect T="AgentMode" @bind-Value="Agent.Mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:190px;" data-testid="agent-mode">
-                                    <MudSelectItem Value="AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</MudSelectItem>
-                                    <MudSelectItem Value="AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</MudSelectItem>
-                                    <MudSelectItem Value="AgentMode.Auto">@L["AGENT_MODE_AUTO"]</MudSelectItem>
-                                </MudSelect>
+                            <div class="agent-composer">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                    <MudTextField @bind-Value="_taskInput"
+                                                  Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
+                                                  Variant="Variant.Text"
+                                                  Margin="Margin.Dense"
+                                                  Underline="false"
+                                                  Disabled="@Agent.IsRunning"
+                                                  Immediate="true"
+                                                  OnKeyDown="OnTaskKeyDown"
+                                                  data-testid="agent-input"
+                                                  Style="flex:1;" />
+                                    @if (Agent.IsRunning)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Stop" Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop" Style="border-radius:10px;" />
+                                    }
+                                    else
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
+                                    }
+                                </MudStack>
+                                <div class="mt-1 pt-1 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
+                                    <MudSelect T="AgentMode" @bind-Value="Agent.Mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Text" Underline="false" Style="max-width:190px;font-size:12px;" data-testid="agent-mode">
+                                        <MudSelectItem Value="AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</MudSelectItem>
+                                        <MudSelectItem Value="AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</MudSelectItem>
+                                        <MudSelectItem Value="AgentMode.Auto">@L["AGENT_MODE_AUTO"]</MudSelectItem>
+                                    </MudSelect>
+                                </div>
                             </div>
                         }
                     </div>

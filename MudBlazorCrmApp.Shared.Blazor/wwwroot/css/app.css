@@ -387,24 +387,85 @@ html, body {
 .agent-floating-panel {
     position: fixed;
     bottom: 24px;
-    inset-inline-end: 24px;
+    left: 24px;
     width: min(440px, 92vw);
-    height: min(580px, 85vh);
+    height: min(600px, 86vh);
     min-width: min(340px, 94vw);
-    min-height: 400px;
+    min-height: 420px;
     max-width: 94vw;
     max-height: 90vh;
     resize: both;
     overflow: hidden;
     z-index: 1150;
-    border-radius: 16px !important;
+    border-radius: 20px !important;
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--mud-palette-lines-default);
+    border: 1px solid color-mix(in srgb, var(--mud-palette-primary) 20%, var(--mud-palette-lines-default));
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18), 0 4px 14px rgba(0, 0, 0, 0.08) !important;
+    background-color: var(--mud-palette-surface);
 }
 
 .agent-drag-handle {
     cursor: move;
     user-select: none;
     touch-action: none;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--mud-palette-primary) 12%, var(--mud-palette-surface)), var(--mud-palette-surface));
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.agent-hero-badge {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--mud-palette-primary), var(--mud-palette-secondary));
+    color: #fff;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--mud-palette-primary) 35%, transparent);
+}
+
+.agent-composer {
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 16px;
+    padding: 10px 12px;
+    background-color: var(--mud-palette-background);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.agent-composer:focus-within {
+    border-color: var(--mud-palette-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mud-palette-primary) 16%, transparent);
+}
+
+.agent-bubble-user {
+    max-width: 85%;
+    border-radius: 16px 16px 16px 4px !important;
+    background: linear-gradient(135deg, var(--mud-palette-primary), color-mix(in srgb, var(--mud-palette-primary) 82%, #000));
+    color: #fff !important;
+}
+
+.agent-bubble-assistant {
+    max-width: 94%;
+    border-radius: 16px 16px 4px 16px !important;
+    background-color: var(--mud-palette-background);
+    border: 1px solid var(--mud-palette-lines-default);
+}
+
+.agent-tool-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-family: monospace;
+    direction: ltr;
+    background-color: color-mix(in srgb, var(--mud-palette-primary) 8%, var(--mud-palette-surface));
+    color: var(--mud-palette-text-secondary);
+    border: 1px solid color-mix(in srgb, var(--mud-palette-primary) 18%, transparent);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

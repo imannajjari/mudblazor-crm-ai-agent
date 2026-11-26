@@ -411,30 +411,38 @@ window.crmAgentDriver = (function () {
 
         handle.addEventListener('pointerdown', (e) => {
             if (e.button !== 0 || e.target.closest('button, input, select, a')) return;
+            e.preventDefault();
             const rect = panel.getBoundingClientRect();
-            panel.style.left = rect.left + 'px';
-            panel.style.top = rect.top + 'px';
+            const startLeft = rect.left;
+            const startTop = rect.top;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            panel.style.left = startLeft + 'px';
+            panel.style.top = startTop + 'px';
             panel.style.right = 'auto';
             panel.style.bottom = 'auto';
-            panel.style.insetInlineEnd = 'auto';
-            const offsetX = e.clientX - rect.left;
-            const offsetY = e.clientY - rect.top;
+
+            try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
 
             function onMove(ev) {
-                const maxLeft = Math.max(0, window.innerWidth - panel.offsetWidth);
-                const maxTop = Math.max(0, window.innerHeight - panel.offsetHeight);
-                panel.style.left = Math.min(maxLeft, Math.max(0, ev.clientX - offsetX)) + 'px';
-                panel.style.top = Math.min(maxTop, Math.max(0, ev.clientY - offsetY)) + 'px';
+                const box = panel.getBoundingClientRect();
+                const maxLeft = Math.max(0, window.innerWidth - box.width);
+                const maxTop = Math.max(0, window.innerHeight - box.height);
+                const nextLeft = Math.min(maxLeft, Math.max(0, startLeft + (ev.clientX - startX)));
+                const nextTop = Math.min(maxTop, Math.max(0, startTop + (ev.clientY - startY)));
+                panel.style.left = nextLeft + 'px';
+                panel.style.top = nextTop + 'px';
             }
-            function onUp() {
-                document.removeEventListener('pointermove', onMove);
-                document.removeEventListener('pointerup', onUp);
-                document.removeEventListener('pointercancel', onUp);
+            function onUp(ev) {
+                try { handle.releasePointerCapture(ev.pointerId); } catch { /* ignore */ }
+                handle.removeEventListener('pointermove', onMove);
+                handle.removeEventListener('pointerup', onUp);
+                handle.removeEventListener('pointercancel', onUp);
                 window.removeEventListener('blur', onUp);
             }
-            document.addEventListener('pointermove', onMove);
-            document.addEventListener('pointerup', onUp);
-            document.addEventListener('pointercancel', onUp);
+            handle.addEventListener('pointermove', onMove);
+            handle.addEventListener('pointerup', onUp);
+            handle.addEventListener('pointercancel', onUp);
             window.addEventListener('blur', onUp);
         });
     }

@@ -15,7 +15,7 @@
     <MudSpacer />
     @if (_agentEnabled)
     {
-        <MudIconButton Icon="@Icons.Material.Filled.SmartToy"
+        <MudIconButton Icon="@MudBlazorCrmApp.Shared.Blazor.Services.Agent.AgentIcons.CopilotSvg"
                        Color="Color.Inherit"
                        title="@L["AGENT_BUTTON_TOOLTIP"]"
                        OnClick="@(() => { Agent.IsDrawerOpen = !Agent.IsDrawerOpen; })"
