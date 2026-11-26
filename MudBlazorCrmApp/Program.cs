@@ -177,11 +177,23 @@ builder.Services.AddHttpClient("Loopback")
     });
 builder.Services.AddSingleton<IAgentRateLimiter, MemoryCacheRateLimiter>();
 builder.Services.AddSingleton<IAgentHelpCatalog, AgentHelpService>();
+builder.Services.AddSingleton<AgentAttachmentPolicy>();
+builder.Services.AddScoped<AgentUsageCounter>();
 builder.Services.AddScoped<AgentHelpLlmAdvisor>();
 builder.Services.AddScoped<IAgentDataReader, AgentDataService>();
 builder.Services.AddScoped<IServerToolHandler, ReadDataToolHandler>();
 builder.Services.AddScoped<IServerToolHandler, AskHelpToolHandler>();
 builder.Services.AddScoped<IServerToolHandler, GetHelpPageToolHandler>();
+builder.Services.AddScoped<AgentKnowledgeService>();
+builder.Services.AddScoped<IServerToolHandler, RememberFactTool>();
+builder.Services.AddScoped<IServerToolHandler, AskKnowledgeTool>();
+builder.Services.AddScoped<IServerToolHandler, CorrectFactTool>();
+builder.Services.AddScoped<IServerToolHandler, DeleteFactTool>();
+builder.Services.AddScoped<IServerToolHandler, FactDidNotHelpTool>();
+builder.Services.AddSingleton<AgentAttachmentService>();
+builder.Services.AddScoped<IServerToolHandler, ListAttachmentsTool>();
+builder.Services.AddScoped<IServerToolHandler, ReadAttachmentTool>();
+builder.Services.AddScoped<IServerToolHandler, AskAttachmentTool>();
 builder.Services.AddHttpClient<IAgentLlmProvider, OpenAiCompatibleAgentProvider>((sp, client) =>
 {
     var opts = sp.GetRequiredService<IOptions<AgentOptions>>().Value;

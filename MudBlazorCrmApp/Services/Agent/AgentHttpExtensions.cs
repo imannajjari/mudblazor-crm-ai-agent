@@ -10,4 +10,13 @@ public static class AgentHttpExtensions
                ?? user.Identity?.Name
                ?? throw new UnauthorizedAccessException("Authenticated user identifier is required.");
     }
+
+    public static string GetAgentLanguage(this HttpContext? ctx)
+    {
+        var header = ctx?.Request.Headers["X-Agent-Language"].FirstOrDefault()
+                     ?? ctx?.Request.Headers.AcceptLanguage.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(header) && header.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+            return "en";
+        return "fa";
+    }
 }

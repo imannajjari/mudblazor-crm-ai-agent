@@ -8,6 +8,8 @@ namespace MudBlazorCrmApp.Services.Agent;
 /// </summary>
 public static class AgentTranscriptValidator
 {
+    public const int MaxTotalMessageChars = 4_000_000;
+
     public static bool TryParseMessages(
         IReadOnlyList<string>? rawMessages,
         int maxMessages,
@@ -17,10 +19,13 @@ public static class AgentTranscriptValidator
         if (rawMessages == null || rawMessages.Count == 0 || rawMessages.Count > maxMessages)
             return false;
 
+        long totalChars = 0;
         var knownToolCallIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var raw in rawMessages)
         {
             if (string.IsNullOrWhiteSpace(raw)) return false;
+            totalChars += raw.Length;
+            if (totalChars > MaxTotalMessageChars) return false;
             JsonNode? node;
             try { node = JsonNode.Parse(raw); }
             catch (JsonException) { return false; }
@@ -96,8 +101,19 @@ public sealed class AgentServerGuard
         for (var i = messages.Count - 1; i >= 0; i--)
         {
             if (TryGetString(messages[i]["role"]) != "user") continue;
-            var content = TryGetString(messages[i]["content"]) ?? "";
-            return content.TrimStart().StartsWith("[how-to question]", StringComparison.OrdinalIgnoreCase);
+            var content = (TryGetString(messages[i]["content"]) ?? "").TrimStart();
+            if (content.StartsWith(AgentKnowledgeWriteGuard.NotesMark, StringComparison.Ordinal) ||
+                content.StartsWith("Relevant CRM Guide Context", StringComparison.Ordinal) ||
+                content.StartsWith("[finish blocked]", StringComparison.OrdinalIgnoreCase) ||
+                content.StartsWith("Your previous reply was empty", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            return content.StartsWith("[how-to question]", StringComparison.OrdinalIgnoreCase)
+                || content.StartsWith("how do i ", StringComparison.OrdinalIgnoreCase)
+                || content.StartsWith("how to ", StringComparison.OrdinalIgnoreCase)
+                || content.StartsWith("چطور ", StringComparison.Ordinal)
+                || content.StartsWith("چگونه ", StringComparison.Ordinal);
         }
         return false;
     }

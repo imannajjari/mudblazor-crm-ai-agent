@@ -1,9 +1,11 @@
 @implements IDisposable
+@using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
 @using MudBlazorCrmApp.Shared.Blazor.Services.Agent
 @inject AgentClientService Agent
 @inject AppText L
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <div data-agent-enabled="@_enabled" data-agent-open="@Agent.IsDrawerOpen">
 @if (_enabled && Agent.IsRunning)
@@ -17,9 +19,18 @@
               Class="agent-floating-panel"
               data-agent-panel="true"
               data-testid="agent-panel">
+        <div class="agent-resize-handle agent-resize-n" data-resize-dir="n"></div>
+        <div class="agent-resize-handle agent-resize-s" data-resize-dir="s"></div>
+        <div class="agent-resize-handle agent-resize-e" data-resize-dir="e"></div>
+        <div class="agent-resize-handle agent-resize-w" data-resize-dir="w"></div>
+        <div class="agent-resize-handle agent-resize-nw" data-resize-dir="nw"></div>
+        <div class="agent-resize-handle agent-resize-ne" data-resize-dir="ne"></div>
+        <div class="agent-resize-handle agent-resize-sw" data-resize-dir="sw"></div>
+        <div class="agent-resize-handle agent-resize-se" data-resize-dir="se"></div>
         <ErrorBoundary>
             <ChildContent>
                 <MudStack Style="height:100%;" Spacing="0" data-agent-panel="true">
+                    <InputFile id="agent-file-input" OnChange="OnAttachmentSelected" multiple accept=".txt,.md,.json,.log,.csv,.tsv,.xlsx,.png,.jpg,.jpeg,.webp" style="display:none;" />
                     <MudToolBar Dense="true" Class="px-3 agent-drag-handle" data-testid="agent-drag-handle">
                         <div style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--mud-palette-primary) 16%, transparent);" class="me-2">
                             <MudIcon Icon="@AgentIcons.CopilotSvg" Color="Color.Primary" Size="Size.Small" />
@@ -28,7 +39,7 @@
                         <MudSpacer />
                         <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small" OnClick="ToggleHistory" title="@L["AGENT_HISTORY"]" data-testid="agent-history-btn" />
                         <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small" OnClick="@(async () => { _showHistory = false; await Agent.NewChatAsync(); })" title="@L["AGENT_NEW_CHAT"]" data-testid="agent-new-chat" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => Agent.IsDrawerOpen = false)" title="@L["AGENT_CLOSE"]" data-testid="agent-close-btn" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="ClosePanel" title="@L["AGENT_CLOSE"]" data-testid="agent-close-btn" />
                     </MudToolBar>
 
                     @if (_showHistory)
@@ -75,6 +86,18 @@
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync("چطور مشتری جدید ثبت کنم؟"))">راهنمای ثبت مشتری</MudChip>
                             </div>
                             <div class="agent-composer" style="width:100%;">
+                                @if (Agent.AttachedFiles.Count > 0)
+                                {
+                                    <div class="agent-chips">
+                                        @foreach (var f in Agent.AttachedFiles)
+                                        {
+                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)">
+                                                <span class="agent-chip__name">@f.FileName</span>
+                                                <button type="button" class="agent-chip__remove" @onclick="@(() => Agent.RemoveAttachmentAsync(f.Id))">×</button>
+                                            </span>
+                                        }
+                                    </div>
+                                }
                                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                                     <MudTextField @bind-Value="_taskInput"
                                                   Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
@@ -86,14 +109,23 @@
                                                   OnKeyDown="OnTaskKeyDown"
                                                   data-testid="agent-input"
                                                   Style="flex:1;" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
+                                    <label for="agent-file-input" title="پیوست فایل (CSV, XLSX, تصویر, متن)" style="cursor:pointer;display:inline-flex;align-items:center;padding:4px;opacity:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "0.5" : "1");pointer-events:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "none" : "auto");">
+                                        <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
+                                    </label>
+                                    <MudIconButton Icon="@(_isListening ? Icons.Material.Filled.MicOff : Icons.Material.Filled.Mic)" Color="@(_isListening ? Color.Error : Color.Default)" Size="Size.Small" OnClick="ToggleVoiceInput" Disabled="@Agent.IsRunning" title="ورودی صوتی فارسی" data-testid="agent-voice-btn" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
                                 </MudStack>
                                 <div class="mt-2 pt-2 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
-                                    <MudSelect T="AgentMode" @bind-Value="Agent.Mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Text" Underline="false" Style="max-width:190px;font-size:12px;" data-testid="agent-mode">
-                                        <MudSelectItem Value="AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</MudSelectItem>
-                                        <MudSelectItem Value="AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</MudSelectItem>
-                                        <MudSelectItem Value="AgentMode.Auto">@L["AGENT_MODE_AUTO"]</MudSelectItem>
-                                    </MudSelect>
+                                    <select class="agent-mode-select"
+                                            value="@Agent.Mode"
+                                            @onchange="OnModeChanged"
+                                            disabled="@Agent.IsRunning"
+                                            style="max-width:190px;font-size:12px;background:transparent;color:inherit;border:1px solid var(--mud-palette-lines-default);border-radius:6px;padding:3px 8px;"
+                                            data-testid="agent-mode">
+                                        <option value="@AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</option>
+                                        <option value="@AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</option>
+                                        <option value="@AgentMode.Auto">@L["AGENT_MODE_AUTO"]</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -119,8 +151,37 @@
                                 }
                                 else if (entry.Kind == "assistant")
                                 {
+                                    var parsed = AgentWidgetParser.Parse(entry.Text);
                                     <MudPaper Class="pa-3 align-self-start agent-bubble-assistant" Elevation="0" Style="word-break:break-word;">
-                                        <div class="mud-typography mud-typography-body2" style="line-height:1.65;">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(entry.Text))</div>
+                                        @if (parsed.Kpis.Count > 0)
+                                        {
+                                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                                @foreach (var kpi in parsed.Kpis)
+                                                {
+                                                    <div class="agent-widget-kpi">
+                                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@kpi.Title</MudText>
+                                                        <MudText Typo="Typo.subtitle2"><b>@kpi.Value</b></MudText>
+                                                        @if (!string.IsNullOrWhiteSpace(kpi.Trend))
+                                                        {
+                                                            <MudText Typo="Typo.caption" Color="Color.Primary">@kpi.Trend</MudText>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(parsed.MarkdownText))
+                                        {
+                                            <div class="mud-typography mud-typography-body2" style="line-height:1.65;">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(parsed.MarkdownText))</div>
+                                        }
+                                        @if (parsed.Actions.Count > 0)
+                                        {
+                                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                                @foreach (var act in parsed.Actions)
+                                                {
+                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Nav.NavigateTo(act.Route))">@act.Label</MudButton>
+                                                }
+                                            </div>
+                                        }
                                     </MudPaper>
                                 }
                                 else if (entry.Kind == "tool")
@@ -152,8 +213,8 @@
 
                         @if (Agent.IsRunning && !Agent.WaitingForUserAnswer && !Agent.WaitingForPermission)
                         {
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-1 px-1">
+                                <span class="agent-working__dots"><i></i><i></i><i></i></span>
                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AGENT_THINKING"]</MudText>
                             </MudStack>
                         }
@@ -183,7 +244,7 @@
                                     <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowOnce))">
                                         @L["AGENT_PERM_ALLOW_ONCE"]
                                     </MudButton>
-                                    @if (Agent.PendingPermissionRisk != "destructive")
+                                    @if (Agent.PendingPermissionRisk is "light" or "export")
                                     {
                                         <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowAlways))">
                                             @L["AGENT_PERM_ALLOW_ALWAYS"]
@@ -210,6 +271,18 @@
                         else
                         {
                             <div class="agent-composer">
+                                @if (Agent.AttachedFiles.Count > 0)
+                                {
+                                    <div class="agent-chips">
+                                        @foreach (var f in Agent.AttachedFiles)
+                                        {
+                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)">
+                                                <span class="agent-chip__name">@f.FileName</span>
+                                                <button type="button" class="agent-chip__remove" @onclick="@(() => Agent.RemoveAttachmentAsync(f.Id))">×</button>
+                                            </span>
+                                        }
+                                    </div>
+                                }
                                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                                     <MudTextField @bind-Value="_taskInput"
                                                   Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
@@ -227,15 +300,24 @@
                                     }
                                     else
                                     {
-                                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@string.IsNullOrWhiteSpace(_taskInput)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
+                                        <label for="agent-file-input" title="پیوست فایل (CSV, XLSX, تصویر, متن)" style="cursor:pointer;display:inline-flex;align-items:center;padding:4px;opacity:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "0.5" : "1");pointer-events:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "none" : "auto");">
+                                            <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
+                                        </label>
+                                        <MudIconButton Icon="@(_isListening ? Icons.Material.Filled.MicOff : Icons.Material.Filled.Mic)" Color="@(_isListening ? Color.Error : Color.Default)" Size="Size.Small" OnClick="ToggleVoiceInput" Disabled="@Agent.IsRunning" title="ورودی صوتی فارسی" data-testid="agent-voice-btn" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
                                     }
                                 </MudStack>
                                 <div class="mt-1 pt-1 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
-                                    <MudSelect T="AgentMode" @bind-Value="Agent.Mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Text" Underline="false" Style="max-width:190px;font-size:12px;" data-testid="agent-mode">
-                                        <MudSelectItem Value="AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</MudSelectItem>
-                                        <MudSelectItem Value="AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</MudSelectItem>
-                                        <MudSelectItem Value="AgentMode.Auto">@L["AGENT_MODE_AUTO"]</MudSelectItem>
-                                    </MudSelect>
+                                    <select class="agent-mode-select"
+                                            value="@Agent.Mode"
+                                            @onchange="OnModeChanged"
+                                            disabled="@Agent.IsRunning"
+                                            style="max-width:190px;font-size:12px;background:transparent;color:inherit;border:1px solid var(--mud-palette-lines-default);border-radius:6px;padding:3px 8px;"
+                                            data-testid="agent-mode">
+                                        <option value="@AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</option>
+                                        <option value="@AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</option>
+                                        <option value="@AgentMode.Auto">@L["AGENT_MODE_AUTO"]</option>
+                                    </select>
                                 </div>
                             </div>
                         }
@@ -256,8 +338,77 @@
 @code {
     private bool _enabled;
     private bool _showHistory;
+    private bool _isListening;
     private string _taskInput = string.Empty;
     private string _answerInput = string.Empty;
+    private const int MaxFilesPerPick = 5;
+    private DotNetObjectReference<AgentPanel>? _dotNetRef;
+
+    private async Task OnAttachmentSelected(InputFileChangeEventArgs e)
+    {
+        if (Agent.IsRunning || Agent.IsUploadingAttachment) return;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(MaxFilesPerPick))
+            {
+                if (file.Size is 0 or > AgentClientService.MaxAttachmentBytes)
+                {
+                    Agent.AddAttachmentError(file.Name, file.Size, "حداکثر حجم مجاز ۱۰ مگابایت است.");
+                    continue;
+                }
+                await using var stream = file.OpenReadStream(AgentClientService.MaxAttachmentBytes);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                await Agent.UploadAttachmentAsync(file.Name, ms.ToArray());
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            Agent.AddAttachmentError("فایل انتخابی", 0, "خطا در خواندن فایل یا تعداد بیش از حد مجاز (حداکثر ۵ فایل).");
+        }
+    }
+
+    private async Task ToggleVoiceInput()
+    {
+        if (_isListening)
+        {
+            _isListening = false;
+            try { await JS.InvokeAsync<string>("crmAgentDriver.stopVoiceInput"); }
+            catch (JSException) { /* ignore */ }
+            return;
+        }
+        _dotNetRef ??= DotNetObjectReference.Create(this);
+        try
+        {
+            var res = await JS.InvokeAsync<string>("crmAgentDriver.startVoiceInput", _dotNetRef);
+            if (res.Contains("\"started\":true", StringComparison.Ordinal))
+                _isListening = true;
+        }
+        catch (JSException) { _isListening = false; }
+    }
+
+    [JSInvokable]
+    public void OnVoiceResult(string transcript)
+    {
+        if (!string.IsNullOrWhiteSpace(transcript))
+            _taskInput = string.IsNullOrWhiteSpace(_taskInput) ? transcript.Trim() : $"{_taskInput.Trim()} {transcript.Trim()}";
+        _isListening = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnVoiceError(string error)
+    {
+        _isListening = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnVoiceEnded()
+    {
+        _isListening = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -314,9 +465,27 @@
         Agent.SubmitUserAnswer(ans);
     }
 
+    private async Task ClosePanel()
+    {
+        if (_isListening)
+        {
+            _isListening = false;
+            try { await JS.InvokeAsync<string>("crmAgentDriver.stopVoiceInput"); }
+            catch (JSException) { /* ignore voice stop errors on close */ }
+        }
+        Agent.IsDrawerOpen = false;
+    }
+
+    private void OnModeChanged(ChangeEventArgs e)
+    {
+        if (Agent.IsRunning) return;
+        if (Enum.TryParse<AgentMode>(e.Value?.ToString(), out var mode))
+            Agent.Mode = mode;
+    }
+
     private async Task OnTaskKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !e.ShiftKey && !Agent.IsRunning)
+        if (e.Key == "Enter" && !e.ShiftKey && !Agent.IsRunning && !Agent.IsUploadingAttachment)
         {
             await SendTask();
         }
@@ -333,5 +502,11 @@
     public void Dispose()
     {
         Agent.OnStateChanged -= HandleStateChanged;
+        if (_isListening)
+        {
+            _isListening = false;
+            _ = JS.InvokeVoidAsync("crmAgentDriver.stopVoiceInput");
+        }
+        _dotNetRef?.Dispose();
     }
 }

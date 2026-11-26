@@ -34,6 +34,14 @@ public static class Extensions
         services.AddScoped<IUiToolHandler, ClickActionHandler>();
         services.AddScoped<IUiToolHandler, ReadGridHeadersHandler>();
         services.AddScoped<IUiToolHandler, SelectGridRowHandler>();
+        services.AddScoped<IUiToolHandler, ClearFiltersHandler>();
+        services.AddScoped<IUiToolHandler, SortGridHandler>();
+        services.AddScoped<IUiToolHandler, RightClickHandler>();
+        services.AddScoped<IBusinessAction, OpenPipelineSummaryAction>();
+        services.AddScoped<IBusinessAction, OpenOverdueTasksAction>();
+        services.AddScoped<BusinessToolRegistry>();
+        services.AddScoped<IUiToolHandler, RunBusinessActionHandler>();
+        services.AddScoped<IUiToolHandler, UploadFileToScreenHandler>();
         services.AddScoped<IUiToolHandler, LookAtScreenHandler>();
         services.AddScoped<IUiToolHandler, LookupTermHandler>();
         services.AddScoped<IUiToolHandler, AskUserHandler>();

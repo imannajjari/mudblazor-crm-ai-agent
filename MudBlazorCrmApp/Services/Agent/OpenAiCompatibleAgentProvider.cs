@@ -42,6 +42,7 @@ public sealed class OpenAiCompatibleAgentProvider(
         {
             ["model"] = options.Model,
             ["temperature"] = 0.2,
+            ["max_tokens"] = options.MaxTokens,
             ["messages"] = new JsonArray(messages.Select(m => m.DeepClone()).ToArray())
         };
 

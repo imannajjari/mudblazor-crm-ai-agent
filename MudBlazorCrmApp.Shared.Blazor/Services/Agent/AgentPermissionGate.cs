@@ -72,7 +72,7 @@ public sealed class AgentPermissionGate
             return (false, $"User declined '{label}'. Do not retry.");
         }
 
-        if (decision == PermissionDecision.AllowAlways && effectiveRisk != "destructive")
+        if (decision == PermissionDecision.AllowAlways && effectiveRisk is "light" or "export")
             _alwaysAllowed.Add(scopeKey);
         if (effectiveRisk == "destructive" && !string.IsNullOrWhiteSpace(targetName))
             _approvedDestructiveTargets.Add($"{route}|{targetName.Trim()}");

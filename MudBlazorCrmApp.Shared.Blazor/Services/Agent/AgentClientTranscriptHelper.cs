@@ -1,13 +1,18 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
 internal readonly record struct AgentToolCall(string Id, string Name, string ArgsJson);
 
-internal static class AgentClientTranscriptHelper
+internal static partial class AgentClientTranscriptHelper
 {
+    [GeneratedRegex(@"<attachment\b[^>]*>[\s\S]*?</attachment>", RegexOptions.IgnoreCase)]
+    private static partial Regex AttachmentBlockRegex();
+
     public static List<string> BuildInitialMessages(
         IEnumerable<AgentClientService.AgentChatEntry> priorTurns,
         string goal,
@@ -15,7 +20,10 @@ internal static class AgentClientTranscriptHelper
     {
         var messages = new List<string>();
         foreach (var turn in priorTurns)
-            messages.Add(JsonSerializer.Serialize(new { role = turn.Kind, content = turn.Text }));
+        {
+            var safeText = AttachmentBlockRegex().Replace(turn.Text ?? string.Empty, "[attachment omitted]");
+            messages.Add(JsonSerializer.Serialize(new { role = turn.Kind, content = safeText }));
+        }
 
         var date = DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         messages.Add(JsonSerializer.Serialize(new
@@ -33,13 +41,56 @@ internal static class AgentClientTranscriptHelper
             content = "Your previous reply was empty. Please provide a clear answer or summary for the user."
         });
 
+    public static string SerializeFinishBlockedNudge(string reason) =>
+        JsonSerializer.Serialize(new
+        {
+            role = "user",
+            content = $"[finish blocked] {reason}"
+        });
+
+    public static void BlankAttachmentToolResults(List<string> messages, ILogger? logger = null)
+    {
+        var attachmentCallIds = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < messages.Count; i++)
+        {
+            try
+            {
+                var node = JsonNode.Parse(messages[i]);
+                if (node is not JsonObject obj) continue;
+                var role = obj["role"]?.GetValue<string>();
+                if (role == "assistant" && obj["tool_calls"] is JsonArray tcs)
+                {
+                    foreach (var tc in tcs)
+                    {
+                        var fnName = tc?["function"]?["name"]?.GetValue<string>();
+                        var tcId = tc?["id"]?.GetValue<string>();
+                        if (!string.IsNullOrEmpty(tcId) && fnName is "list_attachments" or "read_attachment" or "ask_attachment")
+                            attachmentCallIds.Add(tcId);
+                    }
+                }
+                else if (role == "tool")
+                {
+                    var callId = obj["tool_call_id"]?.GetValue<string>();
+                    var content = obj["content"]?.GetValue<string>() ?? string.Empty;
+                    if ((!string.IsNullOrEmpty(callId) && attachmentCallIds.Contains(callId)) ||
+                        AttachmentBlockRegex().IsMatch(content))
+                    {
+                        obj["content"] = """{"ok":true,"redacted":"[attachment-content-omitted]"}""";
+                        messages[i] = obj.ToJsonString();
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                logger?.LogDebug(ex, "Skipped malformed transcript entry while blanking attachments.");
+            }
+        }
+    }
+
     public static string SerializeToolResult(string callId, string resultJson) =>
         JsonSerializer.Serialize(new { role = "tool", tool_call_id = callId, content = resultJson });
 
-    public static string AppendLedger(string summary, List<string> ledger) =>
-        ledger.Count == 0
-            ? summary
-            : $"{summary}\n\n---\n**Actions executed:** {string.Join(" → ", ledger)}";
+    public static string AppendLedger(string summary, List<string> ledger) => summary;
 
     public static List<AgentClientService.AgentChatEntry> DeserializeHistory(
         string? historyJson,
@@ -101,7 +152,7 @@ internal static class AgentClientTranscriptHelper
         }
     }
 
-    public static Dictionary<string, string> ParseServerToolResults(List<string>? rawResults)
+    public static Dictionary<string, string> ParseServerToolResults(List<string>? rawResults, ILogger? logger = null)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
         if (rawResults == null) return map;
@@ -117,12 +168,15 @@ internal static class AgentClientTranscriptHelper
                     if (!string.IsNullOrEmpty(id)) map[id] = raw;
                 }
             }
-            catch (JsonException) { }
+            catch (JsonException ex)
+            {
+                logger?.LogDebug(ex, "Skipped malformed server tool result JSON.");
+            }
         }
         return map;
     }
 
-    public static void TryLogPriorMessage(string raw, List<AgentClientService.AgentChatEntry> entries)
+    public static void TryLogPriorMessage(string raw, List<AgentClientService.AgentChatEntry> entries, ILogger? logger = null)
     {
         try
         {
@@ -138,6 +192,9 @@ internal static class AgentClientTranscriptHelper
                 entries.Add(new AgentClientService.AgentChatEntry("tool", $"[server] {name}({args})"));
             }
         }
-        catch (JsonException) { }
+        catch (JsonException ex)
+        {
+            logger?.LogDebug(ex, "Skipped malformed prior assistant JSON.");
+        }
     }
 }

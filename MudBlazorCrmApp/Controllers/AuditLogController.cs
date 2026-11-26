@@ -10,7 +10,7 @@ namespace MudBlazorCrmApp.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[Authorize]
+[Authorize(Roles = "Administrator")]
 [EnableRateLimiting("Fixed")]
 public class AuditLogController(ApplicationDbContext ctx, ILogger<AuditLogController> logger) : ControllerBase
 {

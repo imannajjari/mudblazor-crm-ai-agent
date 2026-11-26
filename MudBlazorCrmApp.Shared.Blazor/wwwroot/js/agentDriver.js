@@ -42,14 +42,35 @@ window.crmAgentDriver = (function () {
         }
         if (/\b(yes|confirm)\b/.test(t) || t === 'بله') return 'confirm';
         if (/\b(save|submit|add|create|update|ok)\b/.test(t) ||
-            ['ذخیره', 'ثبت', 'افزودن', 'تایید'].some(k => t.includes(k))) {
+            ['ذخیره', 'ثبت', 'افزودن', 'تایید', 'به‌روزرسانی', 'به روز رسانی'].some(k => t.includes(k))) {
             return 'save';
         }
         if (/\b(cancel|close|back|refresh|reload|search|filter|view|details|next|prev|previous)\b/.test(t) ||
             ['انصراف', 'بستن', 'بازگشت', 'جستجو', 'فیلتر', 'تازه‌سازی', 'بعدی', 'قبلی'].some(k => t.includes(k))) {
             return 'read';
         }
-        return 'write';
+        return 'ask';
+    }
+
+    function sanitizeUrl(rawUrl) {
+        try {
+            const u = new URL(rawUrl, window.location.origin);
+            const masked = new URLSearchParams();
+            for (const [k, v] of u.searchParams.entries()) {
+                masked.append(k, /^(token|code|secret|password|key|auth)$/i.test(k) ? '***' : v);
+            }
+            const qs = masked.toString();
+            return u.pathname + (qs ? '?' + qs : '');
+        } catch {
+            return window.location.pathname;
+        }
+    }
+
+    function getActiveRoot() {
+        const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
+        return (dialogs.length > 0 ? dialogs[dialogs.length - 1] : null)
+            || document.querySelector('.mud-main-content')
+            || document.body;
     }
 
     function captureSnapshot() {
@@ -76,7 +97,7 @@ window.crmAgentDriver = (function () {
             });
         });
 
-        // Fields
+        // Fields (inputs, selects, autocompletes, date pickers)
         const fields = [];
         let fieldIdx = 1;
         root.querySelectorAll('.mud-input-control').forEach(ctrl => {
@@ -87,17 +108,59 @@ window.crmAgentDriver = (function () {
             const label = cleanText(labelEl ? labelEl.innerText : (input.getAttribute('placeholder') || input.getAttribute('aria-label') || ''));
             const id = 'f' + (fieldIdx++);
             const isSelect = !!ctrl.closest('.mud-select');
-            elementMap.set(id, isSelect ? ctrl.closest('.mud-select') : input);
+            const isAuto = !!ctrl.closest('.mud-autocomplete');
+            const isDate = !!ctrl.closest('.mud-picker');
+            elementMap.set(id, isSelect ? ctrl.closest('.mud-select') : (isAuto ? ctrl.closest('.mud-autocomplete') : input));
+            const kind = isSelect ? 'select' : (isAuto ? 'autocomplete' : (isDate ? 'date' : (input.tagName === 'TEXTAREA' ? 'textarea' : (input.type || 'text'))));
+            const isPassword = (input.type || '').toLowerCase() === 'password';
             fields.push({
                 id,
                 label: label || id,
-                kind: isSelect ? 'select' : (input.tagName === 'TEXTAREA' ? 'textarea' : (input.type || 'text')),
-                value: input.value || '',
+                kind,
+                value: isPassword ? '(hidden)' : (input.value || ''),
                 maxLength: input.maxLength > 0 ? input.maxLength : null,
                 required: input.hasAttribute('required') || ctrl.classList.contains('mud-input-required') || input.getAttribute('aria-required') === 'true' || label.includes('*'),
                 invalid: ctrl.classList.contains('mud-input-error') || input.getAttribute('aria-invalid') === 'true',
-                // MudSelect renders a readonly inner input by design; only treat readOnly as disabled for non-select inputs
-                disabled: isSelect ? (ctrl.classList.contains('mud-disabled') || input.disabled) : (input.disabled || input.readOnly)
+                // MudSelect and non-editable MudDatePicker render a readonly inner input by design
+                disabled: (isSelect || isDate) ? (ctrl.classList.contains('mud-disabled') || input.disabled) : (input.disabled || input.readOnly)
+            });
+        });
+
+        // Checkboxes and Switches
+        root.querySelectorAll('.mud-checkbox, .mud-switch').forEach(ctrl => {
+            if (!isVisible(ctrl)) return;
+            const input = ctrl.querySelector('input[type="checkbox"]');
+            if (!input) return;
+            const label = cleanText(ctrl.innerText || input.getAttribute('aria-label') || '');
+            const id = 'f' + (fieldIdx++);
+            elementMap.set(id, input);
+            fields.push({
+                id,
+                label: label || id,
+                kind: 'checkbox',
+                value: input.checked ? 'true' : 'false',
+                maxLength: null,
+                required: input.hasAttribute('required') || input.getAttribute('aria-required') === 'true',
+                invalid: false,
+                disabled: input.disabled || ctrl.classList.contains('mud-disabled')
+            });
+        });
+
+        // File inputs (exclude panel's own hidden attachment input)
+        const fileInputs = [];
+        let fileIdx = 1;
+        root.querySelectorAll('input[type="file"]').forEach(input => {
+            if (isExcluded(input)) return;
+            const labelEl = input.id ? root.querySelector(`label[for="${input.id}"]`) : null;
+            const label = cleanText((labelEl ? labelEl.innerText : '') || input.getAttribute('aria-label') || input.getAttribute('name') || input.id || 'File');
+            const id = 'fi' + (fileIdx++);
+            elementMap.set(id, input);
+            fileInputs.push({
+                id,
+                label,
+                accept: input.getAttribute('accept') || '',
+                multiple: !!input.multiple,
+                disabled: !!input.disabled
             });
         });
 
@@ -166,13 +229,18 @@ window.crmAgentDriver = (function () {
             .map(el => cleanText(el.innerText))
             .filter(Boolean);
 
+        const blocker = detectDeleteBlocker(root);
+
         return JSON.stringify({
-            url: window.location.pathname + window.location.search,
+            url: sanitizeUrl(window.location.href),
             title: cleanText(headingEl ? headingEl.innerText : document.title),
             inDialog: !!topDialog,
             dialogText: topDialog ? cleanText(topDialog.querySelector('.mud-dialog-content')?.innerText || '') : '',
+            blocksDelete: blocker.blocksDelete,
+            inUseSummary: blocker.inUseSummary,
             tabs,
             fields: fields.slice(0, 40),
+            fileInputs: fileInputs.slice(0, 10),
             grids,
             actions: actions.slice(0, 40),
             lookupOptions,
@@ -182,8 +250,19 @@ window.crmAgentDriver = (function () {
         });
     }
 
+    function detectDeleteBlocker(root) {
+        const candidates = Array.from(root.querySelectorAll('.mud-alert, .mud-dialog-content, .mud-error-text'))
+            .filter(isVisible)
+            .map(el => cleanText(el.innerText))
+            .filter(Boolean);
+        const blockerPattern = /\b(in use|cannot delete|cannot be deleted|referenced by|has related)\b|در حال استفاده|قابل حذف نیست|امکان حذف/i;
+        const match = candidates.find(t => blockerPattern.test(t));
+        return match ? { blocksDelete: true, inUseSummary: match.slice(0, 240) } : { blocksDelete: false, inUseSummary: null };
+    }
+
     function getOpenComboOptions() {
-        const popovers = Array.from(document.querySelectorAll('.mud-popover-open')).filter(isVisible);
+        const popovers = Array.from(document.querySelectorAll('.mud-popover-open'))
+            .filter(p => isVisible(p) && p.querySelector('.mud-list-item'));
         const options = [];
         popovers.forEach(p => {
             Array.from(p.querySelectorAll('.mud-list-item'))
@@ -196,14 +275,27 @@ window.crmAgentDriver = (function () {
     }
 
     function captureVisibleText() {
-        const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
-        const root = (dialogs.length > 0 ? dialogs[dialogs.length - 1] : null)
-            || document.querySelector('.mud-main-content')
-            || document.body;
-        const clone = root.cloneNode(true);
-        clone.querySelectorAll('[data-agent-panel="true"], script, style').forEach(el => el.remove());
-        const text = (clone.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
-        return text.slice(0, 30000);
+        const root = getActiveRoot();
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+                const parent = node.parentElement;
+                if (!parent || !node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                if (parent.closest('[data-agent-panel="true"], script, style, noscript')) return NodeFilter.FILTER_REJECT;
+                if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        const chunks = [];
+        let total = 0;
+        let n;
+        while ((n = walker.nextNode())) {
+            const s = cleanText(n.nodeValue);
+            if (!s) continue;
+            chunks.push(s);
+            total += s.length + 1;
+            if (total >= 30000) break;
+        }
+        return chunks.join('\n').slice(0, 30000);
     }
 
     function spotlightElement(el) {
@@ -231,8 +323,25 @@ window.crmAgentDriver = (function () {
         if (!input) {
             return JSON.stringify({ ok: false, error: 'Input element not found for id: ' + id });
         }
-        if (input.disabled || input.readOnly) {
+        const isDate = !!el.closest('.mud-picker') || !!input.closest('.mud-picker');
+        const isAuto = el.classList?.contains('mud-autocomplete') || !!input.closest('.mud-autocomplete');
+        if (input.disabled || (!isDate && input.readOnly)) {
             return JSON.stringify({ ok: false, error: 'Field is disabled or read-only: ' + id });
+        }
+
+        if (input.type === 'checkbox') {
+            const norm = cleanText(String(value ?? '')).toLowerCase();
+            const truthy = ['true', '1', 'yes', 'on', 'بله'].includes(norm);
+            const falsy = ['false', '0', 'no', 'off', 'خیر'].includes(norm);
+            if (!truthy && !falsy) {
+                return JSON.stringify({ ok: false, error: `Invalid checkbox value '${value}'. Use true or false.` });
+            }
+            spotlightElement(input);
+            if (input.checked !== truthy) {
+                input.click();
+                await waitForSettle(300);
+            }
+            return JSON.stringify({ ok: true, id, fieldValue: input.checked ? 'true' : 'false' });
         }
 
         const strVal = value == null ? '' : String(value);
@@ -240,24 +349,40 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: false, error: `Value exceeds maxLength (${input.maxLength}).` });
         }
 
+        const isPassword = (input.type || '').toLowerCase() === 'password';
         spotlightElement(input);
         input.focus();
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-            input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-            'value'
-        )?.set;
-        if (nativeSetter) {
-            nativeSetter.call(input, strVal);
-        } else {
-            input.value = strVal;
+        setNativeInputValue(input, strVal);
+
+        if (isDate) {
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            await new Promise(r => requestAnimationFrame(r));
+            input.blur();
+            await waitForSettle(400);
+            return JSON.stringify({ ok: true, id, fieldValue: isPassword ? '(hidden)' : input.value });
         }
-        input.dispatchEvent(new InputEvent('input', { bubbles: true, data: strVal }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
+
+        if (isAuto) {
+            await waitForSettle(400);
+            const items = Array.from(document.querySelectorAll('.mud-popover-open .mud-list-item')).filter(isVisible);
+            const q = cleanText(strVal).toLowerCase();
+            const match = items.find(i => cleanText(i.innerText).toLowerCase() === q)
+                || items.find(i => cleanText(i.innerText).toLowerCase().includes(q));
+            if (match) {
+                match.click();
+                await waitForSettle(400);
+            } else {
+                input.blur();
+                await waitForSettle(300);
+            }
+            return JSON.stringify({ ok: true, id, fieldValue: isPassword ? '(hidden)' : input.value });
+        }
+
         await new Promise(r => requestAnimationFrame(r));
         input.blur();
 
         await waitForSettle(400);
-        return JSON.stringify({ ok: true, id, fieldValue: input.value });
+        return JSON.stringify({ ok: true, id, fieldValue: isPassword ? '(hidden)' : input.value });
     }
 
     async function openCombo(id) {
@@ -350,10 +475,7 @@ window.crmAgentDriver = (function () {
     }
 
     function readGridHeaders(find) {
-        const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
-        const root = (dialogs.length > 0 ? dialogs[dialogs.length - 1] : null)
-            || document.querySelector('.mud-main-content')
-            || document.body;
+        const root = getActiveRoot();
         const tables = Array.from(root.querySelectorAll('.mud-table-root')).filter(isVisible);
         const headers = tables.flatMap(t => Array.from(t.querySelectorAll('thead th')).map(th => cleanText(th.innerText)).filter(Boolean));
         if (find) {
@@ -365,7 +487,7 @@ window.crmAgentDriver = (function () {
     }
 
     function getNavRouteList() {
-        const blocked = new Set(['/logout', '/account/changepassword', '/login', '/register', '/user']);
+        const blockedPrefixes = ['/logout', '/account', '/login', '/register', '/user', '/auditlog', '/import', '/emailtemplate'];
         const links = Array.from(document.querySelectorAll('.mud-navmenu a.mud-nav-link, a.mud-nav-link'));
         const seen = new Set();
         const routes = [];
@@ -374,7 +496,8 @@ window.crmAgentDriver = (function () {
             const text = cleanText(a.textContent || a.innerText);
             if (!href || href.startsWith('http') || href === '#') return;
             const normHref = href.startsWith('/') ? href : '/' + href;
-            if (blocked.has(normHref.toLowerCase())) return;
+            const low = normHref.split('?')[0].split('#')[0].replace(/\/+$/, '').toLowerCase() || '/';
+            if (blockedPrefixes.some(p => low === p || low.startsWith(p + '/'))) return;
             const key = normHref + '|' + text;
             if (seen.has(key)) return;
             seen.add(key);
@@ -408,14 +531,87 @@ window.crmAgentDriver = (function () {
         });
     }
 
+    function enablePanelResize(panel) {
+        if (!panel) return;
+        const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
+        panel.querySelectorAll('.agent-resize-handle').forEach(handle => {
+            if (handle.dataset.resizeBound === '1') return;
+            handle.dataset.resizeBound = '1';
+            const dir = handle.dataset.resizeDir || '';
+            handle.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = panel.getBoundingClientRect();
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startLeft = rect.left;
+                const startTop = rect.top;
+                const startRight = rect.right;
+                const startBottom = rect.bottom;
+                const startWidth = rect.width;
+                const startHeight = rect.height;
+
+                panel.style.left = startLeft + 'px';
+                panel.style.top = startTop + 'px';
+                panel.style.right = 'auto';
+                panel.style.bottom = 'auto';
+                panel.style.width = startWidth + 'px';
+                panel.style.height = startHeight + 'px';
+
+                try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+
+                function onMove(ev) {
+                    const dx = ev.clientX - startX;
+                    const dy = ev.clientY - startY;
+                    const minW = Math.min(340, window.innerWidth * 0.94);
+                    const maxW = window.innerWidth * 0.94;
+                    const minH = Math.min(420, window.innerHeight * 0.90);
+                    const maxH = window.innerHeight * 0.90;
+
+                    if (dir.includes('e')) {
+                        const w = clamp(startWidth + dx, minW, Math.min(maxW, window.innerWidth - startLeft));
+                        panel.style.width = w + 'px';
+                    }
+                    if (dir.includes('w')) {
+                        const newLeft = clamp(startLeft + dx, Math.max(0, startRight - maxW), startRight - minW);
+                        panel.style.left = newLeft + 'px';
+                        panel.style.width = (startRight - newLeft) + 'px';
+                    }
+                    if (dir.includes('s')) {
+                        const h = clamp(startHeight + dy, minH, Math.min(maxH, window.innerHeight - startTop));
+                        panel.style.height = h + 'px';
+                    }
+                    if (dir.includes('n')) {
+                        const newTop = clamp(startTop + dy, Math.max(0, startBottom - maxH), startBottom - minH);
+                        panel.style.top = newTop + 'px';
+                        panel.style.height = (startBottom - newTop) + 'px';
+                    }
+                }
+                function onUp(ev) {
+                    try { handle.releasePointerCapture(ev.pointerId); } catch { /* ignore */ }
+                    handle.removeEventListener('pointermove', onMove);
+                    handle.removeEventListener('pointerup', onUp);
+                    handle.removeEventListener('pointercancel', onUp);
+                    window.removeEventListener('blur', onUp);
+                }
+                handle.addEventListener('pointermove', onMove);
+                handle.addEventListener('pointerup', onUp);
+                handle.addEventListener('pointercancel', onUp);
+                window.addEventListener('blur', onUp);
+            });
+        });
+    }
+
     function enablePanelDrag() {
         const panel = document.querySelector('[data-testid="agent-panel"]');
+        enablePanelResize(panel);
         const handle = document.querySelector('[data-testid="agent-drag-handle"]');
         if (!panel || !handle || handle.dataset.dragBound === '1') return;
         handle.dataset.dragBound = '1';
 
         handle.addEventListener('pointerdown', (e) => {
-            if (e.button !== 0 || e.target.closest('button, input, select, a')) return;
+            if (e.button !== 0 || e.target.closest('button, input, select, a, .agent-resize-handle')) return;
             e.preventDefault();
             const rect = panel.getBoundingClientRect();
             const startLeft = rect.left;
@@ -452,6 +648,153 @@ window.crmAgentDriver = (function () {
         });
     }
 
+    async function clearFilters() {
+        const root = getActiveRoot();
+        const inputs = Array.from(root.querySelectorAll('.mud-table-toolbar input, .mud-table-filter input, thead input'))
+            .filter(el => isVisible(el) && !el.disabled && !el.readOnly && (el.value || '').length > 0);
+        const saved = inputs.map(el => ({ el, value: el.value }));
+        let cleared = 0;
+        let succeeded = false;
+        try {
+            for (const { el } of saved) {
+                setNativeInputValue(el, '');
+                cleared++;
+            }
+            if (cleared > 0) await waitForSettle(600);
+            succeeded = true;
+            return JSON.stringify({ ok: true, cleared });
+        } catch (err) {
+            return JSON.stringify({ ok: false, error: err?.message || 'Failed to clear filters.' });
+        } finally {
+            if (!succeeded) {
+                for (const { el, value } of saved) {
+                    if (document.contains(el)) setNativeInputValue(el, value);
+                }
+            }
+        }
+    }
+
+    function setNativeInputValue(input, strVal) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+            input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+            'value'
+        )?.set;
+        if (nativeSetter) nativeSetter.call(input, strVal);
+        else input.value = strVal;
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, data: strVal }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    async function sortGrid(column, direction) {
+        const root = getActiveRoot();
+        const q = cleanText(column).toLowerCase();
+        if (!q) return JSON.stringify({ ok: false, error: 'Column name is required.' });
+        const ths = Array.from(root.querySelectorAll('.mud-table-root thead th')).filter(isVisible);
+        const target = ths.find(th => cleanText(th.innerText).toLowerCase() === q)
+            || ths.find(th => cleanText(th.innerText).toLowerCase().includes(q));
+        if (!target) return JSON.stringify({ ok: false, error: 'Column not found: ' + column });
+
+        const clickTarget = target.querySelector('.mud-table-sort-label') || target;
+        spotlightElement(clickTarget);
+        const expected = direction ? (String(direction).toLowerCase() === 'desc' ? 'descending' : 'ascending') : null;
+        const maxClicks = expected ? 3 : 1;
+        for (let i = 0; i < maxClicks; i++) {
+            clickTarget.click();
+            await waitForSettle(500);
+            const current = (target.getAttribute('aria-sort') || '').toLowerCase();
+            if (!expected || current === expected) {
+                return JSON.stringify({ ok: true, column: cleanText(target.innerText), direction: current || 'toggled' });
+            }
+        }
+        return JSON.stringify({ ok: false, error: 'Failed to reach requested sort direction: ' + direction });
+    }
+
+    async function uploadFileToInput(id, fileName, base64, contentType) {
+        const el = elementMap.get(id);
+        const input = el && el.matches && el.matches('input[type="file"]') ? el : el?.querySelector?.('input[type="file"]');
+        if (!input || !document.contains(input)) {
+            return JSON.stringify({ ok: false, error: 'File input id not found in current snapshot: ' + id });
+        }
+        let bin;
+        try {
+            bin = atob(base64 || '');
+        } catch {
+            return JSON.stringify({ ok: false, error: 'Invalid base64 file content.' });
+        }
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        const file = new File([arr], fileName || 'upload.bin', { type: contentType || 'application/octet-stream' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await waitForSettle(600);
+        return JSON.stringify({ ok: true, fileName: file.name });
+    }
+
+    async function rightClick(id) {
+        const el = elementMap.get(id);
+        if (!el || !document.contains(el)) {
+            return JSON.stringify({ ok: false, error: 'Element id not found: ' + id });
+        }
+        spotlightElement(el);
+        const rect = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+        }));
+        await waitForSettle(400);
+        return JSON.stringify({ ok: true, id, menuOptions: getOpenComboOptions() });
+    }
+
+    let activeRecognition = null;
+    let voiceGeneration = 0;
+
+    function startVoiceInput(dotNetRef) {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRec) {
+            return JSON.stringify({ supported: false, error: 'Speech recognition is not supported in this browser.' });
+        }
+        const gen = ++voiceGeneration;
+        try {
+            if (activeRecognition) {
+                try { activeRecognition.abort(); } catch { /* ignore abort error */ }
+            }
+            const rec = new SpeechRec();
+            rec.lang = 'fa-IR';
+            rec.interimResults = false;
+            rec.maxAlternatives = 1;
+            const safeInvoke = (method, ...args) => {
+                if (dotNetRef && gen === voiceGeneration) {
+                    dotNetRef.invokeMethodAsync(method, ...args).catch(() => { /* panel disposed */ });
+                }
+            };
+            rec.onresult = (ev) => safeInvoke('OnVoiceResult', ev?.results?.[0]?.[0]?.transcript || '');
+            rec.onerror = (ev) => safeInvoke('OnVoiceError', ev?.error || 'voice_error');
+            rec.onend = () => {
+                if (gen === voiceGeneration) activeRecognition = null;
+                safeInvoke('OnVoiceEnded');
+            };
+            activeRecognition = rec;
+            rec.start();
+            return JSON.stringify({ supported: true, started: true });
+        } catch (err) {
+            return JSON.stringify({ supported: true, started: false, error: err?.message || 'Voice start failed.' });
+        }
+    }
+
+    function stopVoiceInput() {
+        voiceGeneration++;
+        try {
+            if (activeRecognition) activeRecognition.abort();
+        } catch { /* ignore stop errors */ }
+        activeRecognition = null;
+        return JSON.stringify({ ok: true });
+    }
+
     return {
         captureSnapshot,
         captureVisibleText,
@@ -463,6 +806,12 @@ window.crmAgentDriver = (function () {
         selectTab,
         selectGridRow,
         readGridHeaders,
+        clearFilters,
+        sortGrid,
+        rightClick,
+        uploadFileToInput,
+        startVoiceInput,
+        stopVoiceInput,
         getNavRoutes,
         waitForSettle,
         enablePanelDrag

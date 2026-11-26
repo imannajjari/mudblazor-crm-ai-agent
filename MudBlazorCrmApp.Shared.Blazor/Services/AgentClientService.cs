@@ -36,6 +36,10 @@ public sealed class AgentClientService(
     public string? PendingPermissionRisk { get; private set; }
 
     public IReadOnlyList<AgentChatEntry> Entries => _entries;
+    public const long MaxAttachmentBytes = 10 * 1024 * 1024;
+    private readonly List<AttachedFileItem> _attachedFiles = [];
+    public IReadOnlyList<AttachedFileItem> AttachedFiles => _attachedFiles;
+    public bool IsUploadingAttachment { get; private set; }
     public List<AgentChatSummaryDto> SavedChats { get; private set; } = [];
     public string CurrentChatKey { get; private set; } = NewChatKey();
     public int TotalCalls { get; private set; }
@@ -91,6 +95,7 @@ public sealed class AgentClientService(
         CurrentChatKey = detail.ChatKey;
         _nextTaskSeq = Math.Max(1, detail.TaskCount + 1);
         _entries.Clear();
+        _attachedFiles.Clear(); // prevent leaking attachments across chats
         _entries.AddRange(AgentClientTranscriptHelper.DeserializeHistory(detail.HistoryJson, chatKey, logger));
         permissionGate.ResetSession();
         ResetCounters();
@@ -107,13 +112,68 @@ public sealed class AgentClientService(
 
     public async Task NewChatAsync()
     {
+        var oldKey = CurrentChatKey;
         await StopAndWaitAsync();
         CurrentChatKey = NewChatKey();
         _nextTaskSeq = 1;
         _entries.Clear();
+        _attachedFiles.Clear();
         permissionGate.ResetSession();
         ResetCounters();
         NotifyChanged();
+        try { await _stepApi.DeleteChatAttachmentsAsync(oldKey, CancellationToken.None); }
+        catch (Exception ex) { logger.LogDebug(ex, "Cleanup attachments failed."); }
+    }
+
+    public void AddAttachmentError(string fileName, long sizeBytes, string error)
+    {
+        _attachedFiles.Add(new AttachedFileItem(Guid.NewGuid().ToString("N"), fileName, "Error", sizeBytes, DateTime.UtcNow, error));
+        NotifyChanged();
+    }
+
+    public async Task UploadAttachmentAsync(string fileName, byte[] bytes, CancellationToken ct = default)
+    {
+        if (bytes.Length == 0 || bytes.Length > MaxAttachmentBytes)
+        {
+            AddAttachmentError(fileName, bytes.LongLength, "حداکثر حجم مجاز ۱۰ مگابایت است.");
+            return;
+        }
+        var uploadChatKey = CurrentChatKey;
+        IsUploadingAttachment = true;
+        NotifyChanged();
+        try
+        {
+            var res = await _stepApi.UploadAttachmentAsync(uploadChatKey, fileName, bytes, ct);
+            if (uploadChatKey != CurrentChatKey) return;
+            if (res == null || !string.IsNullOrWhiteSpace(res.Error) || string.IsNullOrWhiteSpace(res.Id))
+                AddAttachmentError(fileName, bytes.LongLength, res?.Error ?? "خطا در آپلود فایل");
+            else
+                _attachedFiles.Add(new AttachedFileItem(res.Id, res.FileName ?? fileName, res.Kind ?? "File", res.SizeBytes, res.ExpiresUtc));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Attachment upload failed.");
+            if (uploadChatKey == CurrentChatKey)
+                AddAttachmentError(fileName, bytes.LongLength, "خطا در ارسال فایل");
+        }
+        finally
+        {
+            IsUploadingAttachment = false;
+            NotifyChanged();
+        }
+    }
+
+    public async Task RemoveAttachmentAsync(string id)
+    {
+        var item = _attachedFiles.FirstOrDefault(f => f.Id == id);
+        if (item == null) return;
+        _attachedFiles.Remove(item);
+        NotifyChanged();
+        if (item.Error == null)
+        {
+            try { await _stepApi.DeleteAttachmentAsync(id, CancellationToken.None); }
+            catch (Exception ex) { logger.LogDebug(ex, "Delete attachment failed."); }
+        }
     }
 
     public async Task ClearOnLogoutAsync()
@@ -123,6 +183,7 @@ public sealed class AgentClientService(
         await StopAndWaitAsync();
         _nextTaskSeq = 1;
         _entries.Clear();
+        _attachedFiles.Clear(); // clear attachments on logout
         SavedChats = [];
         permissionGate.ResetSession();
         ResetCounters();
@@ -195,7 +256,11 @@ public sealed class AgentClientService(
         {
             toolDispatcher.ResetSafety();
             var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
-            messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, goal, snapshotJson);
+            var activeFiles = AttachedFiles.Where(f => f.Error == null && f.ExpiresUtc > DateTime.UtcNow).ToList();
+            var taskPrompt = activeFiles.Count == 0
+                ? goal
+                : string.Join("\n", activeFiles.Select(f => $"[att:{f.Id} \"{f.FileName}\", {f.Kind}]")) + "\n" + goal;
+            messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, taskPrompt, snapshotJson);
             lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, ct);
         }
         catch (OperationCanceledException)
@@ -217,6 +282,7 @@ public sealed class AgentClientService(
         TaskRunState run, List<string> messages, List<string> ledger, string snapshotJson, CancellationToken ct)
     {
         var emptyRetries = 0;
+        var finishRetries = 0;
         for (var step = 0; step < MaxTaskSteps; step++)
         {
             ct.ThrowIfCancellationRequested();
@@ -236,7 +302,7 @@ public sealed class AgentClientService(
             if (!string.IsNullOrWhiteSpace(stepRes.Error)) { _entries.Add(new AgentChatEntry("error", stepRes.Error)); return string.Empty; }
             if (string.IsNullOrWhiteSpace(stepRes.Assistant)) { _entries.Add(new AgentChatEntry("error", "Assistant returned an empty message.")); return string.Empty; }
 
-            foreach (var p in stepRes.Prior ?? []) { messages.Add(p); AgentClientTranscriptHelper.TryLogPriorMessage(p, _entries); }
+            foreach (var p in stepRes.Prior ?? []) { messages.Add(p); AgentClientTranscriptHelper.TryLogPriorMessage(p, _entries, logger); }
             messages.Add(stepRes.Assistant);
 
             if (!AgentClientTranscriptHelper.TryParseToolCalls(stepRes.Assistant, out var textReply, out var toolCalls))
@@ -258,6 +324,16 @@ public sealed class AgentClientService(
                         continue;
                     }
                 }
+                else
+                {
+                    var unsavedErr = toolDispatcher.CheckFinishAllowed();
+                    if (unsavedErr != null && finishRetries < 2)
+                    {
+                        finishRetries++;
+                        messages.Add(AgentClientTranscriptHelper.SerializeFinishBlockedNudge(unsavedErr));
+                        continue;
+                    }
+                }
                 var summaryText = string.IsNullOrWhiteSpace(textReply) ? appText["AGENT_EMPTY_REPLY"] : textReply;
                 var summary = AgentClientTranscriptHelper.AppendLedger(summaryText, ledger);
                 _entries.Add(new AgentChatEntry("assistant", summary));
@@ -265,7 +341,7 @@ public sealed class AgentClientService(
             }
 
             emptyRetries = 0;
-            var serverResults = AgentClientTranscriptHelper.ParseServerToolResults(stepRes.ServerToolResults);
+            var serverResults = AgentClientTranscriptHelper.ParseServerToolResults(stepRes.ServerToolResults, logger);
             var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, snapshotJson, ct);
             snapshotJson = updatedSnap;
             if (finished) return finalSummary;
@@ -312,6 +388,7 @@ public sealed class AgentClientService(
         if (run.ChatKey != CurrentChatKey) return;
         try
         {
+            AgentClientTranscriptHelper.BlankAttachmentToolResults(messages, logger);
             var durationMs = (int)(DateTimeOffset.UtcNow - run.StartedAt).TotalMilliseconds;
             await chatStore.SaveChatAndTaskAsync(
                 run.ChatKey, run.TaskSeq, goal, lastSummary,

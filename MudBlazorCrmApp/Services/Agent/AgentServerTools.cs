@@ -5,14 +5,15 @@ namespace MudBlazorCrmApp.Services.Agent;
 public sealed class ReadDataToolHandler(IAgentDataReader dataReader) : IServerToolHandler
 {
     public string Name => "read_data";
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) => dataReader.ReadAsync(args, ct);
+    public Task<string> ExecuteAsync(JsonElement args, ServerToolContext ctx, CancellationToken ct) =>
+        dataReader.ReadAsync(args, ct);
 }
 
 public sealed class AskHelpToolHandler(IAgentHelpCatalog helpCatalog) : IServerToolHandler
 {
     public string Name => "ask_help";
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct)
+    public Task<string> ExecuteAsync(JsonElement args, ServerToolContext ctx, CancellationToken ct)
     {
         var q = args.TryGetProperty("question", out var qEl) ? qEl.GetString() ?? "" : "";
         var hits = helpCatalog.Search(q);
@@ -29,7 +30,7 @@ public sealed class GetHelpPageToolHandler(IAgentHelpCatalog helpCatalog) : ISer
 {
     public string Name => "get_help_page";
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct)
+    public Task<string> ExecuteAsync(JsonElement args, ServerToolContext ctx, CancellationToken ct)
     {
         var t = args.TryGetProperty("title", out var tEl) ? tEl.GetString() ?? "" : "";
         var hit = helpCatalog.GetPage(t);

@@ -175,11 +175,13 @@ public class AgentServiceTests
     [Fact]
     public void SafeMarkdownFormatter_EncodesHtmlAndFormatsMarkdown()
     {
-        var html = SafeMarkdownFormatter.ToSafeHtml("تعداد: **۱۴** <script>alert(1)</script> `code`");
+        var html = SafeMarkdownFormatter.ToSafeHtml("تعداد: **۱۴** <script>alert(1)</script> `code`\n\n| # | اقدام |\n|---|---|\n| 1 | ذخیره |");
         Assert.DoesNotContain("<script>", html);
         Assert.Contains("&lt;script&gt;", html);
         Assert.Contains("<strong>۱۴</strong>", html);
         Assert.Contains("<code ", html);
+        Assert.Contains("<table class=\"agent-md-table\">", html);
+        Assert.Contains("<td>ذخیره</td>", html);
     }
 
     [Fact]
@@ -267,7 +269,8 @@ public class AgentServiceTests
         }, "u1", CancellationToken.None);
 
         Assert.Null(howToRes.Error);
-        Assert.Equal(3, fakeProvider.LastToolCount);
+        Assert.Equal(AgentToolSchemas.GetHowToTools().Length, fakeProvider.LastToolCount);
+        Assert.True(fakeProvider.LastToolCount >= 7);
 
         var finalRes = await service.StepAsync(new AgentStepRequestModel
         {

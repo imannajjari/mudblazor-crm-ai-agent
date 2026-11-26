@@ -11,6 +11,8 @@ public sealed record LookResponseDto(string? Text, LookUsageDto? Usage, string? 
 
 public sealed record LookUsageDto(int InputTokens, int OutputTokens, int CachedInputTokens, int Calls, decimal? Cost);
 
+public sealed record AttachmentDownloadDto(string? Id, string? FileName, string? ContentType, string? Content);
+
 public interface IAgentUiHost
 {
     Task<string> CaptureSnapshotAsync(CancellationToken ct = default);
@@ -19,10 +21,13 @@ public interface IAgentUiHost
     Task InvokeDriverVoidAsync(string fn, CancellationToken ct, params object?[] args);
     void NavigateTo(string route);
     Task<LookResponseDto?> PostLookAsync(string text, string question, CancellationToken ct);
+    Task<AttachmentDownloadDto?> GetAttachmentAsync(string id, CancellationToken ct);
     (string Url, bool InDialog) ReadUrlAndDialog(string snapshotJson);
     (string Text, string Risk) LookupAction(string snapshotJson, string id);
+    string LookupFieldLabel(string snapshotJson, string id);
     bool EvaluateSaveIncomplete(string clickResultJson, string snapshotJson, bool wasInDialog, string risk);
     string Translate(string key);
+    string LookupTerm(string term);
     JsonNode? TryParseNode(string json);
     Task<(bool Allowed, string? BlockReason)> AuthorizeAsync(
         AgentMode mode, string route, bool inDialog, string actionText, string risk, string targetName,
@@ -47,6 +52,12 @@ public interface IUiToolHandler
 
 internal static class UiToolArgs
 {
+    public static bool IsOk(string resultJson, IAgentUiHost host) =>
+        host.TryParseNode(resultJson) is JsonObject obj &&
+        obj["ok"] is JsonValue v &&
+        v.TryGetValue<bool>(out var ok) &&
+        ok;
+
     public static string GetString(JsonElement args, string prop)
     {
         if (!args.TryGetProperty(prop, out var el)) return string.Empty;
@@ -113,8 +124,12 @@ public sealed class SetFieldHandler : IUiToolHandler
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder or empty value '{val}' is not allowed. Ask the user if missing." }), false, null, ctx.CurrentSnapshotJson);
 
         var res = await ctx.Host.InvokeDriverStringAsync("setField", ct, id, val);
-        ctx.Safety.MarkDirty();
-        ctx.Ledger.Add($"set_field({id} = \"{val}\")");
+        if (UiToolArgs.IsOk(res, ctx.Host))
+        {
+            ctx.Safety.MarkDirty();
+            var fieldLabel = ctx.Host.LookupFieldLabel(ctx.CurrentSnapshotJson, id);
+            ctx.Ledger.Add($"مقداردهی فیلد|{fieldLabel}: «{val}»");
+        }
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
     }
@@ -140,8 +155,11 @@ public sealed class PickOptionHandler : IUiToolHandler
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder option '{opt}' is not allowed." }), false, null, ctx.CurrentSnapshotJson);
 
         var res = await ctx.Host.InvokeDriverStringAsync("pickOption", ct, opt);
-        ctx.Safety.MarkDirty();
-        ctx.Ledger.Add($"pick_option(\"{opt}\")");
+        if (UiToolArgs.IsOk(res, ctx.Host))
+        {
+            ctx.Safety.MarkDirty();
+            ctx.Ledger.Add($"انتخاب گزینه|{opt}");
+        }
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
     }
@@ -187,7 +205,8 @@ public sealed class ClickActionHandler : IUiToolHandler
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, deleteRefused = risk == "destructive", reason = blockReason }), false, null, ctx.CurrentSnapshotJson);
 
         var res = await ctx.Host.InvokeDriverStringAsync("clickAction", ct, id);
-        ctx.Ledger.Add($"click_action({actionText} [{risk}])");
+        var targetNote = string.IsNullOrWhiteSpace(targetName) ? "" : $" ({targetName})";
+        ctx.Ledger.Add($"کلیک دکمه|{actionText}{targetNote} [{risk}]");
         var snap = await ctx.Host.CaptureSnapshotAsync(ct);
         var saveDidNotComplete = ctx.Host.EvaluateSaveIncomplete(res, snap, wasInDialog, risk);
         var (_, nowInDialog) = ctx.Host.ReadUrlAndDialog(snap);
@@ -219,6 +238,76 @@ public sealed class SelectGridRowHandler : IUiToolHandler
     }
 }
 
+public sealed class ClearFiltersHandler : IUiToolHandler
+{
+    public string ToolName => "clear_filters";
+    public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
+    {
+        var res = await ctx.Host.InvokeDriverStringAsync("clearFilters", ct);
+        var snap = await ctx.Host.CaptureSnapshotAsync(ct);
+        return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+    }
+}
+
+public sealed class SortGridHandler : IUiToolHandler
+{
+    public string ToolName => "sort_grid";
+    public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
+    {
+        var col = UiToolArgs.GetString(args, "column");
+        if (string.IsNullOrWhiteSpace(col))
+            return new(JsonSerializer.Serialize(new { ok = false, error = "Column name is required." }), false, null, ctx.CurrentSnapshotJson);
+
+        var dir = args.TryGetProperty("direction", out _) ? UiToolArgs.GetString(args, "direction") : null;
+        var res = await ctx.Host.InvokeDriverStringAsync("sortGrid", ct, col, dir);
+        var snap = await ctx.Host.CaptureSnapshotAsync(ct);
+        return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+    }
+}
+
+public sealed class RightClickHandler : IUiToolHandler
+{
+    public string ToolName => "right_click";
+    public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
+    {
+        var id = UiToolArgs.GetString(args, "id");
+        if (string.IsNullOrWhiteSpace(id))
+            return new(JsonSerializer.Serialize(new { ok = false, error = "Element id is required." }), false, null, ctx.CurrentSnapshotJson);
+
+        var res = await ctx.Host.InvokeDriverStringAsync("rightClick", ct, id);
+        var snap = await ctx.Host.CaptureSnapshotAsync(ct);
+        return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+    }
+}
+
+public sealed class UploadFileToScreenHandler : IUiToolHandler
+{
+    public string ToolName => "upload_file_to_screen";
+    public async Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
+    {
+        var id = UiToolArgs.GetString(args, "id");
+        var attachmentId = UiToolArgs.GetString(args, "attachmentId");
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(attachmentId))
+            return new(JsonSerializer.Serialize(new { ok = false, error = "Both field id and attachmentId are required." }), false, null, ctx.CurrentSnapshotJson);
+
+        var (route, inDialog) = ctx.Host.ReadUrlAndDialog(ctx.CurrentSnapshotJson);
+        var (allowed, blockReason) = await ctx.Host.AuthorizeAsync(
+            ctx.Mode, route, inDialog, "Upload file", "write", attachmentId, ctx.CurrentSnapshotJson, ctx.AskPermissionAsync, ct);
+        if (!allowed)
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = blockReason }), false, null, ctx.CurrentSnapshotJson);
+
+        var file = await ctx.Host.GetAttachmentAsync(attachmentId, ct);
+        if (file == null || string.IsNullOrWhiteSpace(file.FileName) || string.IsNullOrWhiteSpace(file.Content))
+            return new(JsonSerializer.Serialize(new { ok = false, error = $"Attachment '{attachmentId}' not found or expired." }), false, null, ctx.CurrentSnapshotJson);
+
+        var res = await ctx.Host.InvokeDriverStringAsync("uploadFileToInput", ct, id, file.FileName, file.Content, file.ContentType ?? "application/octet-stream");
+        if (UiToolArgs.IsOk(res, ctx.Host))
+            ctx.Safety.MarkDirty();
+        var snap = await ctx.Host.CaptureSnapshotAsync(ct);
+        return new(JsonSerializer.Serialize(new { result = ctx.Host.TryParseNode(res), snapshot = ctx.Host.TryParseNode(snap) }), false, null, snap);
+    }
+}
+
 public sealed class LookAtScreenHandler : IUiToolHandler
 {
     public string ToolName => "look_at_screen";
@@ -242,7 +331,7 @@ public sealed class LookupTermHandler : IUiToolHandler
     {
         var term = UiToolArgs.GetString(args, "term");
         var (route, _) = await ctx.Host.ResolveRouteAsync(term, ct);
-        return new(JsonSerializer.Serialize(new { ok = true, term, mappedRoute = route, translated = ctx.Host.Translate(term) }), false, null, ctx.CurrentSnapshotJson);
+        return new(JsonSerializer.Serialize(new { ok = true, term, mappedRoute = route, translated = ctx.Host.LookupTerm(term) }), false, null, ctx.CurrentSnapshotJson);
     }
 }
 
@@ -261,10 +350,14 @@ public sealed class FinishHandler : IUiToolHandler
     public string ToolName => "finish";
     public Task<UiToolResult> ExecuteAsync(JsonElement args, UiToolContext ctx, CancellationToken ct)
     {
+        var summary = UiToolArgs.GetString(args, "summary");
+        if (string.IsNullOrWhiteSpace(summary))
+            return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "Non-empty summary is required for finish." }), false, null, ctx.CurrentSnapshotJson));
+
         var unsavedErr = ctx.Safety.CheckFinishOrNavAllowed();
         if (unsavedErr != null)
             return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = unsavedErr }), false, null, ctx.CurrentSnapshotJson));
 
-        return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = true }), true, UiToolArgs.GetString(args, "summary"), ctx.CurrentSnapshotJson));
+        return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = true }), true, summary, ctx.CurrentSnapshotJson));
     }
 }
