@@ -24,20 +24,18 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
         if (queryTokens.Count == 0)
             return [];
 
-        var scored = _sections
-            .Select(sec =>
+        return _sections
+            .Select(sec => new
             {
-                var overlap = queryTokens.Count(t => sec.Tokens.Contains(t));
-                var titleBonus = queryTokens.Count(t => sec.Title.Contains(t, StringComparison.OrdinalIgnoreCase)) * 2;
-                return new { sec, score = overlap + titleBonus };
+                sec,
+                score = queryTokens.Count(t => sec.Tokens.Contains(t))
+                      + queryTokens.Count(t => sec.Title.Contains(t, StringComparison.OrdinalIgnoreCase)) * 2
             })
             .Where(x => x.score > 0)
             .OrderByDescending(x => x.score)
             .Take(maxResults)
             .Select(x => new HelpSearchHit(x.sec.Title, x.sec.Content, x.score))
             .ToList();
-
-        return scored;
     }
 
     public HelpSearchHit? GetPage(string titleQuery)
@@ -54,84 +52,91 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
 
         foreach (var file in Directory.GetFiles(docsDir, "*.md"))
         {
-            var lines = File.ReadAllLines(file);
-            var fileTitle = Path.GetFileNameWithoutExtension(file);
-            var currentTitle = fileTitle;
-            var currentBody = new List<string>();
-            var parentTitle = fileTitle;
-
-            foreach (var line in lines)
-            {
-                var isHeader = false;
-                var headerLevel = 0;
-                var headerTitle = "";
-
-                if (line.StartsWith("## "))
-                {
-                    isHeader = true;
-                    headerLevel = 2;
-                    headerTitle = line[3..].Trim();
-                }
-                else if (line.StartsWith("### "))
-                {
-                    isHeader = true;
-                    headerLevel = 3;
-                    headerTitle = line[4..].Trim();
-                }
-
-                if (isHeader)
-                {
-                    // Save previous section if it has content
-                    if (currentBody.Count > 0)
-                    {
-                        var bodyText = string.Join("\n", currentBody).Trim();
-                        if (!string.IsNullOrWhiteSpace(bodyText))
-                        {
-                            result.Add(new HelpSection(currentTitle, bodyText, Tokenize(currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
-                        }
-                        currentBody.Clear();
-                    }
-
-                    // Update title based on header level
-                    if (headerLevel == 2)
-                    {
-                        // Level 2 (##) becomes new parent
-                        parentTitle = headerTitle;
-                        currentTitle = headerTitle;
-                    }
-                    else if (headerLevel == 3)
-                    {
-                        // Level 3 (###) becomes child with parent prefix
-                        currentTitle = $"{parentTitle} > {headerTitle}";
-                    }
-                }
-                else
-                {
-                    currentBody.Add(line);
-                }
-            }
-
-            // Save final section
-            if (currentBody.Count > 0)
-            {
-                var bodyText = string.Join("\n", currentBody).Trim();
-                if (!string.IsNullOrWhiteSpace(bodyText))
-                {
-                    result.Add(new HelpSection(currentTitle, bodyText, Tokenize(currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
-                }
-            }
+            var parser = new SectionParser(Path.GetFileNameWithoutExtension(file));
+            foreach (var line in File.ReadAllLines(file))
+                parser.Feed(line);
+            parser.Flush(result);
         }
 
         return result;
     }
 
+    /// <summary>
+    /// Parses one markdown help file into flat H2/H3 sections.
+    /// H2 (##) starts a new top-level section.
+    /// H3 (###) becomes a child section titled "Parent > Child" so help search
+    /// returns precise, lower-token chunks instead of one giant section.
+    /// </summary>
+    private sealed class SectionParser
+    {
+        private string _parentTitle;
+        private string _currentTitle;
+        private readonly List<string> _currentBody = new();
+        private readonly List<HelpSection> _result = new();
+
+        public SectionParser(string fileTitle)
+        {
+            _parentTitle = fileTitle;
+            _currentTitle = fileTitle;
+        }
+
+        public void Feed(string line)
+        {
+            if (!TryParseHeader(line, out var level, out var title))
+            {
+                _currentBody.Add(line);
+                return;
+            }
+
+            FlushBody(); // save the section that just ended under its old title
+            _currentTitle = level == 2 ? title : $"{_parentTitle} > {title}";
+            if (level == 2)
+                _parentTitle = title;
+        }
+
+        public void Flush(List<HelpSection> result)
+        {
+            FlushBody();
+            foreach (var section in _result)
+                result.Add(section);
+        }
+
+        private void FlushBody()
+        {
+            var bodyText = string.Join("\n", _currentBody).Trim();
+            _currentBody.Clear();
+            if (!string.IsNullOrWhiteSpace(bodyText))
+                _result.Add(new HelpSection(
+                    _currentTitle,
+                    bodyText,
+                    Tokenize(_currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+        }
+
+        private static bool TryParseHeader(string line, out int level, out string title)
+        {
+            level = 0;
+            title = string.Empty;
+            if (line.StartsWith("## "))
+            {
+                level = 2;
+                title = line[3..].Trim();
+                return true;
+            }
+            if (line.StartsWith("### "))
+            {
+                level = 3;
+                title = line[4..].Trim();
+                return true;
+            }
+            return false;
+        }
+    }
+
     private static IEnumerable<string> Tokenize(string text)
     {
         foreach (Match m in TokenRegex().Matches(text))
-        {
             if (m.Value.Length >= 2)
                 yield return m.Value;
-        }
     }
 
     public sealed record HelpSection(string Title, string Content, HashSet<string> Tokens);

@@ -52,6 +52,64 @@ public class AgentExtendedTests
     }
 
     [Fact]
+    public void AgentHelpService_ChunksH3IntoParentPrefixSections()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "crm_help_" + Guid.NewGuid().ToString("N"));
+        var helpDir = Path.Combine(tempRoot, "HelpDocs");
+        Directory.CreateDirectory(helpDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(helpDir, "guide.md"), """
+                ## Customer Guide
+                Open Customers page and click Add to create a customer record.
+
+                ### Field IDs
+                name: Text, required.
+                email: Email, required.
+
+                ### Workflow
+                Click Add, fill fields, click Save.
+
+                ## Lead Guide
+                Convert qualified leads into opportunities.
+                """);
+
+            var svc = new AgentHelpService(new FakeHostEnv(tempRoot));
+
+            // H2 section title
+            var customerSection = svc.GetPage("Customer Guide");
+            Assert.NotNull(customerSection);
+            Assert.Contains("click Add", customerSection!.Content);
+
+            // H3 child sections get "Parent > Child" titles
+            var fieldIdsSection = svc.GetPage("Field IDs");
+            Assert.NotNull(fieldIdsSection);
+            Assert.Equal("Customer Guide > Field IDs", fieldIdsSection!.Title);
+            Assert.Contains("name:", fieldIdsSection.Content);
+
+            var workflowSection = svc.GetPage("Workflow");
+            Assert.NotNull(workflowSection);
+            Assert.Equal("Customer Guide > Workflow", workflowSection!.Title);
+            Assert.Contains("click Save", workflowSection.Content);
+
+            // H2 section under Lead Guide
+            var leadSection = svc.GetPage("Lead Guide");
+            Assert.NotNull(leadSection);
+            Assert.Equal("Lead Guide", leadSection!.Title);
+            Assert.Contains("Convert qualified leads", leadSection.Content);
+
+            // Search for "field ids" should return the H3 chunk, not the whole file
+            var hits = svc.Search("field ids");
+            Assert.NotEmpty(hits);
+            Assert.Equal("Customer Guide > Field IDs", hits[0].Title);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AgentHelpLlmAdvisor_ExtractsKeywordsDistillsAndFallsBackOnError()
     {
         var catalog = new StubHelpCatalog([new HelpSearchHit("Customer Guide", "Click Add on /Customer.", 3)]);
