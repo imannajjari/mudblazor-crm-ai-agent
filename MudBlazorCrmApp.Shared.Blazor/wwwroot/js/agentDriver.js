@@ -403,6 +403,42 @@ window.crmAgentDriver = (function () {
         });
     }
 
+    function enablePanelDrag() {
+        const panel = document.querySelector('[data-testid="agent-panel"]');
+        const handle = document.querySelector('[data-testid="agent-drag-handle"]');
+        if (!panel || !handle || handle.dataset.dragBound === '1') return;
+        handle.dataset.dragBound = '1';
+
+        handle.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 || e.target.closest('button, input, select, a')) return;
+            const rect = panel.getBoundingClientRect();
+            panel.style.left = rect.left + 'px';
+            panel.style.top = rect.top + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            panel.style.insetInlineEnd = 'auto';
+            const offsetX = e.clientX - rect.left;
+            const offsetY = e.clientY - rect.top;
+
+            function onMove(ev) {
+                const maxLeft = Math.max(0, window.innerWidth - panel.offsetWidth);
+                const maxTop = Math.max(0, window.innerHeight - panel.offsetHeight);
+                panel.style.left = Math.min(maxLeft, Math.max(0, ev.clientX - offsetX)) + 'px';
+                panel.style.top = Math.min(maxTop, Math.max(0, ev.clientY - offsetY)) + 'px';
+            }
+            function onUp() {
+                document.removeEventListener('pointermove', onMove);
+                document.removeEventListener('pointerup', onUp);
+                document.removeEventListener('pointercancel', onUp);
+                window.removeEventListener('blur', onUp);
+            }
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            document.addEventListener('pointercancel', onUp);
+            window.addEventListener('blur', onUp);
+        });
+    }
+
     return {
         captureSnapshot,
         captureVisibleText,
@@ -415,6 +451,7 @@ window.crmAgentDriver = (function () {
         selectGridRow,
         readGridHeaders,
         getNavRoutes,
-        waitForSettle
+        waitForSettle,
+        enablePanelDrag
     };
 })();
