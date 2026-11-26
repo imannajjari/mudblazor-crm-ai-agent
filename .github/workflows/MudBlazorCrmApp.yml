@@ -32,8 +32,7 @@ jobs:
     - name: Build
       run: dotnet build "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-restore
     - name: Test
-      run: dotnet test --no-build --verbosity normal
-      continue-on-error: true
+      run: dotnet test MudBlazorCrmApp.Tests/MudBlazorCrmApp.Tests.csproj --configuration ${{ env.CONFIGURATION }} --no-restore --verbosity normal
     - name: Publish
       run: dotnet publish "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-build --output "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}"
     - name: Publish Artifacts
@@ -42,6 +41,7 @@ jobs:
         name: webapp
         path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.ENABLE_AZURE_DEPLOY == 'true' }}
     runs-on: windows-latest
     needs: build
     environment:
