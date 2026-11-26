@@ -55,20 +55,55 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
         foreach (var file in Directory.GetFiles(docsDir, "*.md"))
         {
             var lines = File.ReadAllLines(file);
-            var currentTitle = Path.GetFileNameWithoutExtension(file);
+            var fileTitle = Path.GetFileNameWithoutExtension(file);
+            var currentTitle = fileTitle;
             var currentBody = new List<string>();
+            var parentTitle = fileTitle;
 
             foreach (var line in lines)
             {
+                var isHeader = false;
+                var headerLevel = 0;
+                var headerTitle = "";
+
                 if (line.StartsWith("## "))
                 {
+                    isHeader = true;
+                    headerLevel = 2;
+                    headerTitle = line[3..].Trim();
+                }
+                else if (line.StartsWith("### "))
+                {
+                    isHeader = true;
+                    headerLevel = 3;
+                    headerTitle = line[4..].Trim();
+                }
+
+                if (isHeader)
+                {
+                    // Save previous section if it has content
                     if (currentBody.Count > 0)
                     {
                         var bodyText = string.Join("\n", currentBody).Trim();
-                        result.Add(new HelpSection(currentTitle, bodyText, Tokenize(currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+                        if (!string.IsNullOrWhiteSpace(bodyText))
+                        {
+                            result.Add(new HelpSection(currentTitle, bodyText, Tokenize(currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+                        }
                         currentBody.Clear();
                     }
-                    currentTitle = line[3..].Trim();
+
+                    // Update title based on header level
+                    if (headerLevel == 2)
+                    {
+                        // Level 2 (##) becomes new parent
+                        parentTitle = headerTitle;
+                        currentTitle = headerTitle;
+                    }
+                    else if (headerLevel == 3)
+                    {
+                        // Level 3 (###) becomes child with parent prefix
+                        currentTitle = $"{parentTitle} > {headerTitle}";
+                    }
                 }
                 else
                 {
@@ -76,10 +111,14 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
                 }
             }
 
+            // Save final section
             if (currentBody.Count > 0)
             {
                 var bodyText = string.Join("\n", currentBody).Trim();
-                result.Add(new HelpSection(currentTitle, bodyText, Tokenize(currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+                if (!string.IsNullOrWhiteSpace(bodyText))
+                {
+                    result.Add(new HelpSection(currentTitle, bodyText, Tokenize(currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+                }
             }
         }
 
