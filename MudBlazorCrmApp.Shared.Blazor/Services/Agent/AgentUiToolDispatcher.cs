@@ -39,6 +39,8 @@ public sealed class AgentUiToolDispatcher(
         handlers.ToDictionary(h => h.ToolName, StringComparer.Ordinal);
     private readonly AgentSafetyState _safety = new();
 
+    public IReadOnlyCollection<string> HandledToolNames => _handlerMap.Keys;
+
     public void ResetSafety(bool isDeleteGoal = false, bool hasAttachments = false, bool adviceOnlyGoal = false)
     {
         _safety.Reset();

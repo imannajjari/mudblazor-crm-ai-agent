@@ -30,7 +30,7 @@
         <ErrorBoundary>
             <ChildContent>
                 <MudStack Style="height:100%;" Spacing="0" data-agent-panel="true">
-                    <InputFile id="agent-file-input" OnChange="OnAttachmentSelected" multiple accept=".txt,.md,.json,.log,.csv,.tsv,.xlsx,.png,.jpg,.jpeg,.webp" style="display:none;" />
+                    <InputFile id="agent-file-input" data-testid="agent-attach-input" OnChange="OnAttachmentSelected" multiple accept=".txt,.md,.json,.log,.csv,.tsv,.xlsx,.png,.jpg,.jpeg,.webp" style="display:none;" />
                     <MudToolBar Dense="true" Class="px-3 agent-drag-handle" data-testid="agent-drag-handle">
                         <div style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--mud-palette-primary) 16%, transparent);" class="me-2">
                             <MudIcon Icon="@AgentIcons.CopilotSvg" Color="Color.Primary" Size="Size.Small" />
@@ -91,7 +91,7 @@
                                     <div class="agent-chips">
                                         @foreach (var f in Agent.AttachedFiles)
                                         {
-                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)">
+                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)" data-testid="agent-attach-chip">
                                                 <span class="agent-chip__name">@f.FileName</span>
                                                 <button type="button" class="agent-chip__remove" @onclick="@(() => Agent.RemoveAttachmentAsync(f.Id))">×</button>
                                             </span>
@@ -113,7 +113,7 @@
                                         <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
                                     </label>
                                     <MudIconButton Icon="@(_isListening ? Icons.Material.Filled.MicOff : Icons.Material.Filled.Mic)" Color="@(_isListening ? Color.Error : Color.Default)" Size="Size.Small" OnClick="ToggleVoiceInput" Disabled="@Agent.IsRunning" title="@L["AGENT_VOICE_HINT"]" data-testid="agent-voice-btn" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-run" Style="border-radius:10px;" />
                                 </MudStack>
                                 <div class="mt-2 pt-2 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
                                     <select class="agent-mode-select"
@@ -152,7 +152,7 @@
                                 else if (entry.Kind == "assistant")
                                 {
                                     var parsed = AgentWidgetParser.Parse(entry.Text);
-                                    <MudPaper Class="pa-3 align-self-start agent-bubble-assistant" Elevation="0" Style="word-break:break-word;position:relative;">
+                                    <MudPaper Class="pa-3 align-self-start agent-bubble-assistant" Elevation="0" Style="word-break:break-word;position:relative;" data-testid="agent-result">
                                         <div class="d-flex justify-end mb-1">
                                             <MudIconButton Icon="@(_copiedEntry == entry ? Icons.Material.Filled.Check : Icons.Material.Filled.ContentCopy)"
                                                            Size="Size.Small"
@@ -224,7 +224,7 @@
                                 else if (entry.Kind == "tool")
                                 {
                                     var displayTool = entry.Text.StartsWith("finish(", StringComparison.Ordinal) ? "finish" : entry.Text;
-                                    <div class="agent-tool-pill align-self-end" title="@entry.Text">
+                                    <div class="agent-tool-pill align-self-end" title="@entry.Text" data-testid="agent-step" data-blocked="@(entry.IsBlocked ? "true" : null)">
                                         <span>⚙</span>
                                         <span style="overflow:hidden;text-overflow:ellipsis;">@displayTool</span>
                                     </div>
@@ -237,7 +237,7 @@
                                 }
                                 else if (entry.Kind == "error")
                                 {
-                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" data-testid="agent-error">
                                         @L["AGENT_ERROR_PREFIX"]@entry.Text
                                     </MudAlert>
                                 }
@@ -248,9 +248,28 @@
                             }
                         }
 
+                        @if (Agent.LastLedger.Count > 0 || Agent.OpenedLedger.Count > 0)
+                        {
+                            <details class="agent-help-note" data-testid="agent-ledger">
+                                <summary>@L["AGENT_ACTIONS_DONE"] (@(Agent.LastLedger.Count + Agent.OpenedLedger.Count))</summary>
+                                <ul data-testid="agent-ledger-wrote" class="ps-4 my-1">
+                                    @foreach (var item in Agent.LastLedger)
+                                    {
+                                        <li>@item</li>
+                                    }
+                                </ul>
+                                <ul data-testid="agent-ledger-opened" class="ps-4 my-1">
+                                    @foreach (var item in Agent.OpenedLedger)
+                                    {
+                                        <li>@item</li>
+                                    }
+                                </ul>
+                            </details>
+                        }
+
                         @if (Agent.IsRunning && !Agent.WaitingForUserAnswer && !Agent.WaitingForPermission)
                         {
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-1 px-1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-1 px-1" data-testid="agent-working">
                                 <span class="agent-working__dots"><i></i><i></i><i></i></span>
                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AGENT_THINKING"]</MudText>
                             </MudStack>
@@ -274,45 +293,56 @@
                     <div class="pa-3 border-t">
                         @if (Agent.WaitingForPermission)
                         {
-                            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-2" data-testid="agent-permission-prompt">
-                                @string.Format(L["AGENT_PERM_PROMPT"], Agent.PendingPermissionLabel, Agent.PendingPermissionRisk)
-                            </MudAlert>
-                            <MudStack Row="true" Spacing="1">
-                                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowOnce))">
+                            <div data-testid="agent-question">
+                                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-2" data-testid="agent-question-text">
+                                    @string.Format(L["AGENT_PERM_PROMPT"], Agent.PendingPermissionLabel, Agent.PendingPermissionRisk)
+                                </MudAlert>
+                                <MudStack Row="true" Spacing="1">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" data-testid="agent-question-option" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowOnce))">
                                         @L["AGENT_PERM_ALLOW_ONCE"]
                                     </MudButton>
                                     @if (Agent.PendingPermissionRisk is "light" or "export")
                                     {
-                                        <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowAlways))">
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" data-testid="agent-question-option" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowAlways))">
                                             @L["AGENT_PERM_ALLOW_ALWAYS"]
                                         </MudButton>
                                     }
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.Deny))">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" data-testid="agent-question-option" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.Deny))">
                                         @L["AGENT_PERM_DENY"]
                                     </MudButton>
-                            </MudStack>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop" Style="border-radius:10px;" />
+                                </MudStack>
+                            </div>
                         }
                         else if (Agent.WaitingForUserAnswer)
                         {
-                            @if (Agent.PendingQuestionOptions is { Length: > 0 } opts)
-                            {
-                                <div class="d-flex flex-wrap gap-1 mb-2">
-                                    @foreach (var opt in opts)
-                                    {
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => PickUserOption(opt))" data-testid="agent-user-option">@opt</MudButton>
-                                    }
-                                </div>
-                            }
-                            <MudStack Row="true" Spacing="1">
-                                <MudTextField @bind-Value="_answerInput"
-                                              Placeholder="@(Agent.PendingQuestion ?? L["AGENT_INPUT_PLACEHOLDER"])"
-                                              Variant="Variant.Outlined"
-                                              Margin="Margin.Dense"
-                                              Immediate="true"
-                                              OnKeyDown="OnAnswerKeyDown"
-                                              Style="flex:1;" />
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SubmitAnswer">@L["AGENT_SEND"]</MudButton>
-                            </MudStack>
+                            <div data-testid="agent-question">
+                                @if (!string.IsNullOrWhiteSpace(Agent.PendingQuestion))
+                                {
+                                    <MudText Typo="Typo.caption" Class="mb-1 d-block" data-testid="agent-question-text">@Agent.PendingQuestion</MudText>
+                                }
+                                @if (Agent.PendingQuestionOptions is { Length: > 0 } opts)
+                                {
+                                    <div class="d-flex flex-wrap gap-1 mb-2">
+                                        @foreach (var opt in opts)
+                                        {
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => PickUserOption(opt))" data-testid="agent-question-option">@opt</MudButton>
+                                        }
+                                    </div>
+                                }
+                                <MudStack Row="true" Spacing="1">
+                                    <MudTextField @bind-Value="_answerInput"
+                                                  Placeholder="@(Agent.PendingQuestion ?? L["AGENT_INPUT_PLACEHOLDER"])"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  Immediate="true"
+                                                  OnKeyDown="OnAnswerKeyDown"
+                                                  data-testid="agent-question-other-input"
+                                                  Style="flex:1;" />
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" data-testid="agent-question-other-send" OnClick="SubmitAnswer">@L["AGENT_SEND"]</MudButton>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop" Style="border-radius:10px;" />
+                                </MudStack>
+                            </div>
                         }
                         else
                         {
@@ -322,7 +352,7 @@
                                     <div class="agent-chips">
                                         @foreach (var f in Agent.AttachedFiles)
                                         {
-                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)">
+                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)" data-testid="agent-attach-chip">
                                                 <span class="agent-chip__name">@f.FileName</span>
                                                 <button type="button" class="agent-chip__remove" @onclick="@(() => Agent.RemoveAttachmentAsync(f.Id))">×</button>
                                             </span>
@@ -350,7 +380,7 @@
                                             <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
                                         </label>
                                         <MudIconButton Icon="@(_isListening ? Icons.Material.Filled.MicOff : Icons.Material.Filled.Mic)" Color="@(_isListening ? Color.Error : Color.Default)" Size="Size.Small" OnClick="ToggleVoiceInput" Disabled="@Agent.IsRunning" title="@L["AGENT_VOICE_HINT"]" data-testid="agent-voice-btn" />
-                                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-send" Style="border-radius:10px;" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-run" Style="border-radius:10px;" />
                                     }
                                 </MudStack>
                                 <div class="mt-1 pt-1 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">

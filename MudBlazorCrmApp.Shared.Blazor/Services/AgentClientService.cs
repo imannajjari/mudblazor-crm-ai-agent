@@ -67,6 +67,10 @@ public sealed class AgentClientService(
 
     private readonly AgentStepApiClient _stepApi = new(httpClient, tokenProvider);
     private readonly List<AgentChatEntry> _entries = [];
+    private readonly List<string> _lastLedger = [];
+    private readonly List<string> _openedLedger = [];
+    public IReadOnlyList<string> LastLedger => _lastLedger;
+    public IReadOnlyList<string> OpenedLedger => _openedLedger;
     private TaskCompletionSource<string>? _userAnswerTcs;
     private TaskCompletionSource<PermissionDecision>? _permissionTcs;
     private CancellationTokenSource? _cts;
@@ -109,6 +113,8 @@ public sealed class AgentClientService(
         CurrentChatKey = detail.ChatKey;
         _nextTaskSeq = Math.Max(1, detail.TaskCount + 1);
         _entries.Clear();
+        _lastLedger.Clear();
+        _openedLedger.Clear();
         _attachedFiles.Clear(); // prevent leaking attachments across chats
         _entries.AddRange(AgentClientTranscriptHelper.DeserializeHistory(detail.HistoryJson, chatKey, logger));
         permissionGate.ResetSession();
@@ -135,6 +141,8 @@ public sealed class AgentClientService(
         CurrentChatKey = NewChatKey();
         _nextTaskSeq = 1;
         _entries.Clear();
+        _lastLedger.Clear();
+        _openedLedger.Clear();
         _attachedFiles.Clear();
         permissionGate.ResetSession();
         ResetCounters();
@@ -204,6 +212,8 @@ public sealed class AgentClientService(
             await StopAndWaitAsync();
             _nextTaskSeq = 1;
             _entries.Clear();
+            _lastLedger.Clear();
+            _openedLedger.Clear();
             _attachedFiles.Clear(); // clear attachments on logout
             SavedChats = [];
             permissionGate.ResetSession();
@@ -317,6 +327,8 @@ public sealed class AgentClientService(
         var finishRetries = 0;
         var injectedFinalCall = false;
         var recentSignatures = new List<string>();
+        _lastLedger.Clear();
+        _openedLedger.Clear();
         for (var step = 0; step < MaxTaskSteps; step++)
         {
             ct.ThrowIfCancellationRequested();
@@ -434,6 +446,7 @@ public sealed class AgentClientService(
     {
         foreach (var call in toolCalls)
         {
+            var toolEntryIndex = _entries.Count;
             _entries.Add(new AgentChatEntry("tool", $"{call.Name}({call.ArgsJson})"));
             recentSignatures.Add($"{call.Name}:{call.ArgsJson.Trim()}");
             NotifyChanged();
@@ -441,6 +454,8 @@ public sealed class AgentClientService(
             if (serverResults.TryGetValue(call.Id, out var serverMsg))
             {
                 if (call.Name == "read_data") toolDispatcher.MarkRecordRead();
+                if (serverMsg.Contains("\"blocked\":true", StringComparison.Ordinal))
+                    _entries[toolEntryIndex] = _entries[toolEntryIndex] with { IsBlocked = true };
                 messages.Add(serverMsg);
                 continue;
             }
@@ -449,6 +464,12 @@ public sealed class AgentClientService(
                 call.Name, call.ArgsJson, snapshotJson, Mode, ledger, AskPermissionAsync, AskUserAsync,
                 (c, i, o, ci, cost) => { AccumulateRawUsage(run, c, i, o, ci, cost); return Task.CompletedTask; }, ct);
             snapshotJson = updatedSnap;
+            if (resJson.Contains("\"blocked\":true", StringComparison.Ordinal) || resJson.Contains("\"declined\":true", StringComparison.Ordinal))
+                _entries[toolEntryIndex] = _entries[toolEntryIndex] with { IsBlocked = true };
+            if (call.Name is "go_to_page" or "select_tab" && resJson.Contains("\"ok\":true", StringComparison.Ordinal))
+                _openedLedger.Add($"{call.Name}: {call.ArgsJson}");
+            _lastLedger.Clear();
+            _lastLedger.AddRange(ledger.Distinct(StringComparer.Ordinal));
             messages.Add(AgentClientTranscriptHelper.SerializeToolResult(call.Id, resJson));
 
             if (isFinish)
@@ -536,5 +557,5 @@ public sealed class AgentClientService(
     private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
     private void NotifyChanged() => OnStateChanged?.Invoke();
     public void Dispose() { Stop(); _cts?.Dispose(); }
-    public sealed record AgentChatEntry(string Kind, string Text);
+    public sealed record AgentChatEntry(string Kind, string Text, bool IsBlocked = false);
 }
