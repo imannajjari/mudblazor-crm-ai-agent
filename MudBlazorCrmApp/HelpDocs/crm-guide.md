@@ -255,150 +255,161 @@
 
 ## ۱۵. مرجع فنی برای دستیار هوشمند (Agent Technical Reference)
 
-این بخش تنها برای **دستیار هوشمند** طراحی شده و شامل داده‌های دقیق فیلدها، Enumها، قوانین کسب‌وکار و الگوهای پرامپت است.
+این بخش مرجع فنی ساختار واقعی فرم‌ها، گزینه‌های `Select`، قوانین پیاده‌سازی‌شده و الگوهای ابزارهای دستیار در برنامه است.
 
-### ۱۵.۱ Field IDs دقیق فرم‌ها (برای `set_field` / `pick_option`)
+### ۱۵.۱ فیلدهای واقعی فرم‌ها (بر اساس `Add*.razor` و `Update*.razor`)
 
 #### Customer Form (`/Customer` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `name` | نام مشتری | Text | ✓ | Max 200 chars |
-| `type` | نوع | Select | | Options: `Customer`, `Partner`, `Competitor`, `Lead` |
-| `industry` | صنعت | Text | | Max 100 chars |
-| `website` | وب‌سایت | Text | | URL format |
-| `employeeCount` | تعداد کارمندان | Number | | Integer ≥ 0 |
-| `annualRevenue` | درآمد سالانه | Number | | Decimal ≥ 0 |
-| `status` | وضعیت | Select | | Options: `Active`, `Inactive`, `Prospect` |
-| `accountManagerId` | مدیر حساب | User Lookup | | Select from users |
-| `addressId` | آدرس | Address Lookup | | Select existing or create new |
-| `logo` | لوگو | File Upload | | Image file |
-| `notes` | یادداشت | TextArea | | Max 2000 chars |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Name` | نام / Name | Text | |
+| `Type` | نوع / Type | Text | مقدار متنی آزاد |
+| `Industry` | صنعت / Industry | Text | |
+| `Logo` | Logo | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
+| `AddressId` | آدرس / Address | Select | لیست آدرس‌ها (City) |
+| `Contact` | مخاطب / Contact | MultiSelect | انتخاب چند مخاطب (`multiSelect: true`) |
 
 #### Contact Form (`/Contact` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `name` | نام | Text | ✓ | Max 200 chars |
-| `email` | ایمیل | Email | ✓ | Unique per customer |
-| `phone` | تلفن | Text | | Max 50 chars |
-| `role` | عنوان شغلی | Text | | Max 100 chars |
-| `status` | وضعیت | Select | | Options: `Active`, `Inactive` |
-| `customerId` | مشتری | Customer Lookup | ✓ | Required |
-| `photo` | عکس | File Upload | | Image file |
-| `notes` | یادداشت | TextArea | | Max 1000 chars |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Name` | نام / Name | Text | |
+| `Company` | شرکت / Company | Text | |
+| `Title` | عنوان / Title | Text | |
+| `Email` | ایمیل / Email | Text | |
+| `Phone` | تلفن / Phone | Text | |
+| `MobilePhone` | تلفن همراه / Mobile Phone | Text | |
+| `Role` | نقش / Role | Text | |
+| `Department` | دپارتمان / Department | Text | |
+| `LinkedInUrl` | لینکدین / LinkedIn URL | Text | |
+| `Status` | وضعیت / Status | Select | `Active`, `Inactive`, `Prospect` |
+| `PreferredContactMethod` | روش تماس ترجیحی / Preferred Contact Method | Select | `Email`, `Phone`, `SMS`, `LinkedIn` |
+| `IsPrimary` | مخاطب اصلی / Primary Contact | Checkbox | |
+| `DoNotContact` | عدم تماس / Do Not Contact | Checkbox | |
+| `Photo` | Photo | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
+| `AddressId` | آدرس / Address | Select | لیست آدرس‌ها |
+| `Reward` | Reward | MultiSelect | انتخاب چند پاداش |
 
 #### Opportunity Form (`/Opportunity` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `name` | نام فرصت | Text | ✓ | Max 200 chars |
-| `value` | مبلغ | Number | ✓ | Decimal ≥ 0 |
-| `probability` | احتمال | Number | | Integer 0-100 |
-| `stage` | مرحله | Select | ✓ | See Enum values below |
-| `estimatedCloseDate` | تاریخ تخمینی بسته شدن | Date | | |
-| `actualCloseDate` | تاریخ واقعی بسته شدن | Date | | Auto-set on Close Won/Lost |
-| `customerId` | مشتری | Customer Lookup | ✓ | |
-| `contactId` | مخاطب | Contact Lookup | | |
-| `assignedUserId` | کاربر محول | User Lookup | | |
-| `lostReason` | دلیل از دست دادن | TextArea | | Required if Stage = Closed Lost |
-| `competitorInfo` | اطلاعات رقبا | TextArea | | |
-| `icon` | آیکون | Text | | Material icon name |
-| `notes` | یادداشت | TextArea | | Max 2000 chars |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Name` | نام / Name | Text | Required (`[Required]`) |
+| `Value` | Value ($) | Numeric | |
+| `Probability` | Probability (%) | Numeric | `Min=0`, `Max=100` |
+| `EstimatedCloseDate` | Estimated Close Date | DateTimeLocal | فرمت ISO (`yyyy-MM-ddTHH:mm:ss`) |
+| `Stage` | مرحله / Stage | Select | پیش‌فرض `Prospecting` |
+| `CustomerId` | مشتری / Customer | Select | انتخاب از مشتریان |
+| `ContactId` | مخاطب / Contact | Select | انتخاب از مخاطبین |
+| `Icon` | Icon | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
 
 #### Lead Form (`/Lead` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `source` | منبع | Text | ✓ | Max 100 chars |
-| `status` | وضعیت | Select | ✓ | Options: `New`, `Contacted`, `Qualified`, `Lost`, `Converted` |
-| `potentialValue` | ارزش بالقوه | Number | | Decimal ≥ 0 |
-| `notes` | یادداشت | TextArea | | |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Source` | منبع / Source | Text | |
+| `Status` | وضعیت / Status | Text | مقدار متنی آزاد |
+| `PotentialValue` | PotentialValue | Numeric | |
+| `Photo` | Photo | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
+| `AddressId` | آدرس / Address | Select | |
+| `OpportunityId` | فرصت / Opportunity | Select | |
+| `ContactId` | مخاطب / Contact | Select | |
 
 #### SupportCase Form (`/SupportCase` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `title` | عنوان | Text | ✓ | Max 200 chars |
-| `customerId` | مشتری | Customer Lookup | ✓ | |
-| `contactId` | مخاطب | Contact Lookup | | |
-| `productId` | محصول | Product Lookup | | |
-| `serviceId` | خدمات | Service Lookup | | |
-| `priority` | اولویت | Select | ✓ | See Enum values below |
-| `status` | وضعیت | Select | ✓ | See Enum values below |
-| `category` | دسته‌بندی | Text | | Max 100 chars |
-| `channel` | کانال | Select | | Options: `Email`, `Phone`, `Portal`, `Chat`, `In Person` |
-| `description` | توضیحات | TextArea | ✓ | Max 4000 chars |
-| `resolution` | راه‌حل | TextArea | | Max 4000 chars |
-| `assignedUserId` | کاربر محول | User Lookup | | |
-| `slaHours` | ساعات SLA | Number | | Integer 0-720 |
-| `dueDate` | تاریخ سررسید | DateTime | | |
-| `followupDate` | تاریخ پیگیری | DateTime | | |
-| `icon` | آیکون | Text | | Material icon name |
-| `notes` | یادداشت | TextArea | | Max 2000 chars |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Title` | عنوان / Title | Text | |
+| `CustomerId` | شناسه مشتری / Customer Id | Numeric | فیلد عددی (`MudNumericField`) |
+| `ContactId` | شناسه مخاطب / Contact Id | Numeric | فیلد عددی |
+| `ProductId` | شناسه محصول / Product Id | Numeric | فیلد عددی |
+| `ServiceId` | شناسه خدمت / Service Id | Numeric | فیلد عددی |
+| `Priority` | اولویت / Priority | Select | `Low`, `Medium`, `High`, `Critical` |
+| `Status` | وضعیت / Status | Select | `New`, `Open`, `In Progress`, `Waiting on Customer`, `Resolved`, `Closed` |
+| `Category` | دسته‌بندی / Category | Text | |
+| `Channel` | کانال / Channel | Select | `Email`, `Phone`, `Chat`, `Portal` |
+| `Description` | توضیحات / Description | TextArea | |
+| `AssignedUserId` | شناسه کاربر مسئول / Assigned User Id | Text | |
+| `SlaHours` | ساعات SLA / SLA Hours | Numeric | |
+| `DueDate` | سررسید / Due Date | DateTimeLocal | |
+| `FollowupDate` | تاریخ پیگیری / Follow-up Date | DateTimeLocal | |
+| `Icon` | Icon | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | TextArea | |
 
 #### Activity Form (`/Activity` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `type` | نوع | Select | ✓ | Options: `Call`, `Email`, `Meeting`, `Note` |
-| `subject` | موضوع | Text | ✓ | Max 200 chars |
-| `description` | توضیحات | TextArea | | |
-| `activityDate` | تاریخ فعالیت | DateTime | ✓ | |
-| `durationMinutes` | مدت زمان (دقیقه) | Number | | Integer ≥ 0 |
-| `status` | وضعیت | Select | | Options: `Planned`, `Completed`, `Cancelled` |
-| `direction` | جهت | Select | | Options: `Inbound`, `Outbound` |
-| `customerId` | مشتری | Customer Lookup | * | One of Customer/Contact/Lead/Opportunity required |
-| `contactId` | مخاطب | Contact Lookup | * | |
-| `leadId` | سرنخ | Lead Lookup | * | |
-| `opportunityId` | فرصت | Opportunity Lookup | * | |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Type` | نوع / Type | Select | `Call`, `Email`, `Meeting`, `Note`, `Task` |
+| `Subject` | موضوع / Subject | Text | |
+| `Description` | توضیحات / Description | TextArea | |
+| `ActivityDate` | تاریخ / Date | DateTimeLocal | پیش‌فرض زمان فعلی |
+| `DurationMinutes` | مدت (دقیقه) / Duration (minutes) | Numeric | |
+| `Status` | وضعیت / Status | Select | `Completed`, `Scheduled`, `Cancelled` |
+| `Direction` | جهت / Direction | Select | `Inbound`, `Outbound` |
+| `CustomerId` | مشتری / Customer | Select | |
+| `ContactId` | مخاطب / Contact | Select | |
+| `LeadId` | سرنخ / Lead | Select | |
+| `OpportunityId` | فرصت / Opportunity | Select | |
 
 #### Communication Form (`/communication` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `type` | نوع | Select | ✓ | See CommunicationTypes below |
-| `direction` | جهت | Select | ✓ | `Inbound`, `Outbound` |
-| `subject` | موضوع | Text | | Max 500 chars |
-| `body` | متن کامل | TextArea | | |
-| `status` | وضعیت | Select | | Options: `Completed`, `Pending`, `Scheduled`, `Cancelled` |
-| `contactId` | مخاطب | Contact Lookup | * | One reference required |
-| `leadId` | سرنخ | Lead Lookup | * | |
-| `customerId` | مشتری | Customer Lookup | * | |
-| `opportunityId` | فرصت | Opportunity Lookup | * | |
-| `supportCaseId` | تیکت پشتیبانی | SupportCase Lookup | * | |
-| `communicationDate` | تاریخ ارتباط | DateTime | ✓ | |
-| `durationMinutes` | مدت زمان | Number | | 0-1440 |
-| `outcome` | نتیجه | Text | | Max 500 chars |
-| `followUpRequired` | نیاز به پیگیری | Checkbox | | |
-| `followUpDate` | تاریخ پیگیری | DateTime | | Required if followUpRequired |
-| `notes` | یادداشت | TextArea | | Max 2000 chars |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Type` | نوع / Type | Select | `Email`, `Call`, `Meeting`, `Note`, `SMS`, `Video Call`, `In Person`, `Social Media` |
+| `Direction` | جهت / Direction | Select | `Outbound`, `Inbound` |
+| `Subject` | موضوع / Subject | Text | |
+| `Body` | متن / Body | TextArea | |
+| `Status` | وضعیت / Status | Select | `Completed`, `Pending`, `Scheduled`, `Cancelled` |
+| `ContactId` | شناسه مخاطب / Contact Id | Numeric | فیلد عددی |
+| `CustomerId` | شناسه مشتری / Customer Id | Numeric | فیلد عددی |
+| `LeadId` | شناسه سرنخ / Lead Id | Numeric | فیلد عددی |
+| `OpportunityId` | شناسه فرصت / Opportunity Id | Numeric | فیلد عددی |
+| `SupportCaseId` | شناسه تیکت / Support Case Id | Numeric | فیلد عددی |
+| `CommunicationDate` | تاریخ / Date | DateTimeLocal | |
+| `DurationMinutes` | مدت (دقیقه) / Duration (minutes) | Numeric | |
+| `Outcome` | نتیجه / Outcome | Text | |
+| `FollowUpRequired` | نیاز به پیگیری / Follow-up Required | Checkbox | با تیک خوردن فیلد `Follow-up Date` نمایش داده می‌شود |
+| `FollowUpDate` | تاریخ پیگیری / Follow-up Date | DateTimeLocal | فقط در صورت `FollowUpRequired = true` |
+| `Notes` | یادداشت‌ها / Notes | TextArea | |
 
 #### TodoTask Form (`/TodoTask` / `/KanbanTodoTask` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `name` | نام وظیفه | Text | ✓ | Max 200 chars |
-| `description` | توضیحات | TextArea | | |
-| `status` | وضعیت | Select | ✓ | Kanban column: `To Do`, `Open`, `In Process`, `Done` |
-| `dueDate` | تاریخ سررسید | Date | | |
-| `followupDate` | تاریخ پیگیری | Date | | |
-| `notes` | یادداشت | TextArea | | |
-| `icon` | آیکون | Text | | Material icon name |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Name` | نام / Name | Text | |
+| `Description` | توضیحات / Description | Text | |
+| `AssignedTo` | AssignedTo | Numeric | |
+| `Status` | وضعیت / Status | Text | در کانبان مقادیر `To Do`, `Open`, `In Process`, `Done` |
+| `DueDate` | DueDate | DateTimeLocal | |
+| `UserId` | UserId | Numeric | |
+| `FollowupDate` | FollowupDate | DateTimeLocal | |
+| `Icon` | Icon | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
 
 #### Product Form (`/Product` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `name` | نام | Text | ✓ | |
-| `price` | قیمت | Number | ✓ | Decimal ≥ 0 |
-| `description` | توضیحات | TextArea | | |
-| `categoryId` | دسته‌بندی | Select | | ProductCategory Lookup |
-| `icon` | آیکون | Text | | Material icon name |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `Name` | نام / Name | Text | |
+| `Description` | توضیحات / Description | Text | |
+| `Price` | قیمت / Price | Numeric | |
+| `StockQuantity` | StockQuantity | Numeric | |
+| `Photo` | Photo | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
+| `ProductCategory` | ProductCategory | MultiSelect | انتخاب چند دسته‌بندی |
 
 #### Sale Form (`/Sale` - Add/Update)
-| Field ID | Label | Type | Required | Notes |
-|----------|-------|------|----------|-------|
-| `quantity` | تعداد | Number | ✓ | Integer > 0 |
-| `unitPrice` | قیمت واحد | Number | ✓ | Decimal ≥ 0 |
-| `totalAmount` | مبلغ کل | Number | ✓ | Auto-calc: quantity × unitPrice |
-| `saleDate` | تاریخ فروش | Date | ✓ | |
-| `notes` | یادداشت | TextArea | | |
+| Field | Label | Control Type | Notes |
+|-------|-------|--------------|-------|
+| `ProductId` | ProductId | Text | |
+| `ServiceId` | ServiceId | Text | |
+| `CustomerId` | CustomerId | Numeric | |
+| `Quantity` | تعداد / Quantity | Numeric | |
+| `TotalAmount` | TotalAmount | Numeric | واردکردن مستقیم مبلغ کل |
+| `SaleDate` | SaleDate | DateTimeLocal | |
+| `ReceiptPhoto` | ReceiptPhoto | File Upload | `.png,.jpg,.jpeg` |
+| `Notes` | یادداشت‌ها / Notes | Text | |
 
 ---
 
-### ۱۵.۲ Enum Values (مقادیر مجاز Dropdownها)
+### ۱۵.۲ گزینه‌های دقیق Selectها (Enum / Dropdown Values)
 
 #### Opportunity.Stage
 ```
@@ -410,13 +421,19 @@ Closed Won
 Closed Lost
 ```
 
-#### Lead.Status
+#### Contact.Status
 ```
-New
-Contacted
-Qualified
-Lost
-Converted
+Active
+Inactive
+Prospect
+```
+
+#### Contact.PreferredContactMethod
+```
+Email
+Phone
+SMS
+LinkedIn
 ```
 
 #### SupportCase.Priority
@@ -430,8 +447,9 @@ Critical
 #### SupportCase.Status
 ```
 New
+Open
 In Progress
-On Hold
+Waiting on Customer
 Resolved
 Closed
 ```
@@ -440,9 +458,8 @@ Closed
 ```
 Email
 Phone
-Portal
 Chat
-In Person
+Portal
 ```
 
 #### Activity.Type
@@ -451,12 +468,13 @@ Call
 Email
 Meeting
 Note
+Task
 ```
 
 #### Activity.Status
 ```
-Planned
 Completed
+Scheduled
 Cancelled
 ```
 
@@ -466,22 +484,22 @@ Inbound
 Outbound
 ```
 
-#### Communication.Type (CommunicationTypes)
+#### Communication.Type
 ```
 Email
 Call
 Meeting
 Note
 SMS
-VideoCall
-InPerson
-SocialMedia
+Video Call
+In Person
+Social Media
 ```
 
 #### Communication.Direction
 ```
-Inbound
 Outbound
+Inbound
 ```
 
 #### Communication.Status
@@ -500,154 +518,90 @@ In Process
 Done
 ```
 
-#### Customer.Type
+#### Reports (`/reports` — Report Type)
 ```
-Customer
-Partner
-Competitor
-Lead
-```
-
-#### Customer.Status
-```
-Active
-Inactive
-Prospect
-```
-
-#### Contact.Status
-```
-Active
-Inactive
-```
-
-#### Vendor.Type
-```
-Supplier
-Partner
-Contractor
-Service Provider
+Sales Report
+Pipeline Report
+Activity Report
 ```
 
 ---
 
-### ۱۵.۳ قوانین کسب‌وکار و وابستگی‌ها (Business Rules & Dependencies)
+### ۱۵.۳ قوانین واقعی برنامه (Verified Behavior & Constraints)
 
-| قانون | توضیح | پیام خطای احتمالی |
-|--------|-------|------------------|
-| **Lead → Opportunity** | سرنخ باید ابتدا `Qualified` شود، سپس Convert به Opportunity | "Lead must be qualified before conversion" |
-| **Opportunity → Sale** | فقط فرصت‌های `Closed Won` می‌توانند Sale بسازند | "Opportunity must be Closed Won to create sale" |
-| **Contact.CustomerId** | هر مخاطب **باید** به یک مشتری متصل باشد | "Customer is required for contact" |
-| **SupportCase Reference** | تیکت باید حداقل یکی از Customer/Contact/Product/Service داشته باشد | "At least one reference (Customer, Contact, Product, Service) is required" |
-| **Activity Reference** | فعالیت باید دقیقاً به یکی از Customer/Contact/Lead/Opportunity متصل باشد | "Activity must be linked to exactly one entity" |
-| **Communication Reference** | ارتباط باید به حداقل یک موجودیت (Customer/Contact/Lead/Opportunity/SupportCase) متصل باشد | "Communication must have at least one reference" |
-| **Opportunity.ClosedLost** | اگر Stage = `Closed Lost` → `lostReason` الزامی است | "Lost reason is required when stage is Closed Lost" |
-| **Communication.FollowUp** | اگر `followUpRequired` = true → `followUpDate` الزامی | "Follow-up date is required when follow-up is needed" |
-| **SupportCase.SLA** | اگر Priority = `Critical` → SLA پیش‌فرض ۴ ساعت | Auto-calculated on create |
-| **TodoTask.Kanban** | تغییر ستون در کانبان = تغییر Status | Drag&Drop updates status automatically |
-| **User Roles** | فقط `Administrator` به `/user` و `/auditlog` دسترسی دارد | "Access denied: Administrator role required" |
-| **Soft Delete** | تمام موجودیت‌های اصلی Soft Delete دارند (IsDeleted flag) | Records hidden but not removed from DB |
+| موضوع | رفتار واقعی در کد |
+|-------|--------------------|
+| **TodoTask Kanban** | بورد `/KanbanTodoTask` شامل ۴ ستون `To Do`، `Open`، `In Process` و `Done` است. |
+| **Communication Follow-up** | فیلد `Follow-up Date` زمانی در فرم ظاهر می‌شود که تیک `Follow-up Required` فعال شده باشد. |
+| **Administrator Only** | صفحات `/user` و `/auditlog` و کنترلر `AuditLogController` فقط برای نقش `Administrator` قابل دسترسی هستند و در مسیرهای مسدود دستیار قرار دارند. |
+| **Delete Behavior** | حذف در `CommunicationController` به‌صورت Soft Delete (`IsDeleted = true`) و در سایر موجودیت‌ها (`Customer`, `Lead`, `Opportunity`, `SupportCase`, `Sale`) به‌صورت حذف مستقیم انجام می‌شود؛ در دستیار، حذف همیشه با `targetName` و تایید کاربر کنترل می‌شود. |
+| **Unsaved Changes Guard** | تا زمانی که فرمی تغییرات ذخیره‌نشده دارد، ابزارهای ناوبری و `finish` توسط `AgentSafetyState` مسدود می‌شوند. |
 
 ---
 
-### ۱۵.۴ الگوهای پرامپت (Few-Shot Examples برای دستیار)
+### ۱۵.۴ الگوهای ابزارهای دستیار (Verified Few-Shot Examples)
+
+> نکته: شناسه‌های `f1`, `f2`, `a1`, `r1_1` شناسه‌های پویای اسنپ‌شات (`scan_screen`) هستند که در هر صفحه بر اساس `label` یا `text` خوانده می‌شوند.
 
 #### Example 1: Create Opportunity
 ```
-User: "یک فرصت ۵۰ میلیون تومانی برای شرکت پارسیان در مرحله Proposal بساز"
+User: "یک فرصت ۵۰ میلیون دلاری برای شرکت پارسیان در مرحله Proposal بساز"
 Agent Actions:
-1. go_to_page("Opportunity")
-2. click_action("Add") → opens AddOpportunity dialog
-3. set_field(id="name", value="فرصت شرکت پارسیان")
-4. set_field(id="value", value="50000000")
-5. set_field(id="stage", value="Proposal")
-6. set_field(id="customerId", value="پارسیان") → lookup_customer("پارسیان")
-7. set_field(id="probability", value="50")
-8. click_action(id="save")
+1. go_to_page(name="Opportunity")
+2. click_action(id="<Add button id>") → opens AddOpportunity dialog
+3. set_field(id="<Name field id>", value="فرصت شرکت پارسیان")
+4. set_field(id="<Value ($) field id>", value="50000000")
+5. open_combo(id="<Stage field id>") → pick_option(option="Proposal")
+6. open_combo(id="<Customer field id>") → pick_option(option="پارسیان")
+7. click_action(id="<Add/Save button id>")
 ```
 
 #### Example 2: Create Support Case
 ```
-User: "تیکت پشتیبانی اولویت بالا برای مشتری آفا با عنوان 'خطای ورود' باز کن"
+User: "تیکت پشتیبانی اولویت بالا با عنوان 'خطای ورود' برای مشتری شماره ۳ ثبت کن"
 Agent Actions:
-1. go_to_page("SupportCase")
-2. click_action("Add")
-3. set_field(id="title", value="خطای ورود")
-4. set_field(id="priority", value="High")
-6. set_field(id="customerId", value="آفا") → lookup_customer("آفا")
-7. set_field(id="description", value="کاربر نمی‌تواند با گوگل لاگین کند")
-8. set_field(id="status", value="New")
-9. click_action(id="save")
+1. go_to_page(name="SupportCase")
+2. click_action(id="<Add button id>")
+3. set_field(id="<Title field id>", value="خطای ورود")
+4. set_field(id="<Customer Id field id>", value="3")
+5. open_combo(id="<Priority field id>") → pick_option(option="High")
+6. open_combo(id="<Status field id>") → pick_option(option="New")
+7. set_field(id="<Description field id>", value="کاربر نمی‌تواند وارد شود")
+8. click_action(id="<Add/Save button id>")
 ```
 
 #### Example 3: Generate Sales Report
 ```
-User: "گزارش فروش ۶ ماه اخیر رو نشون بده"
+User: "گزارش فروش ماهانه رو نشون بده"
 Agent Actions:
-1. go_to_page("reports")
-2. pick_option(id="reportType", option="sales")
-3. set_field(id="fromDate", value="2026-05-01")
-4. set_field(id="toDate", value="2026-11-01")
-5. click_action(id="generateReport")
+1. go_to_page(name="reports")
+2. open_combo(id="<Report Type field id>") → pick_option(option="Sales Report")
+3. click_action(id="<Generate Report button id>")
 ```
 
-#### Example 4: Convert Lead to Opportunity
+#### Example 4: Create Activity
 ```
-User: "سرنخ 'تماس از وب‌سایت' رو به فرصت تبدیل کن"
+User: "یک فعالیت جلسه برای فردا ساعت ۱۰ ثبت کن"
 Agent Actions:
-1. go_to_page("Lead")
-2. search("تماس از وب‌سایت")
-3. select_grid_row(rowId="lead-123")
-4. click_action(id="convert") → opens conversion dialog
-5. set_field(id="opportunityName", value="فرصت از سرنخ وب‌سایت")
-6. set_field(id="stage", value="Qualification")
-7. click_action(id="confirmConvert")
-```
-
-#### Example 5: Add Activity to Opportunity
-```
-User: "برای فرصت 'قرارداد دیتا' یک جلسه فردا ساعت ۱۰ ثبت کن"
-Agent Actions:
-1. go_to_page("Opportunity")
-4. search("قرارداد دیتا")
-5. select_grid_row(...)
-6. click_action(id="addActivity") → opens AddActivity dialog
-7. set_field(id="type", value="Meeting")
-8. set_field(id="subject", value="مذاکره قرارداد")
-9. set_field(id="activityDate", value="2026-11-28T10:00:00")
-10. set_field(id="durationMinutes", value="60")
-11. set_field(id="opportunityId", value="auto-filled from context")
-12. click_action(id="save")
-```
-
-#### Example 6: Kanban Task Management
-```
-User: "یک وظیفه جدید 'بررسی قرارداد' در ستون In Process اضافه کن"
-Agent Actions:
-1. go_to_page("KanbanTodoTask")
-2. click_action(id="addTask-In Process") → opens inline form in column
-3. set_field(id="name", value="بررسی قرارداد")
-4. set_field(id="status", value="In Process")
-5. set_field(id="dueDate", value="2026-12-01")
-6. click_action(id="saveTask")
+1. go_to_page(name="Activity")
+2. click_action(id="<Add button id>")
+3. open_combo(id="<Type field id>") → pick_option(option="Meeting")
+4. set_field(id="<Subject field id>", value="مذاکره قرارداد")
+5. set_field(id="<Date field id>", value="2026-11-28T10:00:00")
+6. set_field(id="<Duration (minutes) field id>", value="60")
+7. click_action(id="<Add/Save button id>")
 ```
 
 ---
 
-### ۱۵.۵ خطاهای رایج و راه‌حل (Common Errors & Fixes)
+### ۱۵.۵ خطاهای واقعی و راه‌حل (Common Errors & Fixes)
 
-| خطا | علت | راه‌حل دستیار |
-|------|------|---------------|
-| `"Required field 'Customer' is empty"` | CustomerId پر نشده در Contact/Opportunity/SupportCase | `lookup_customer` یا `go_to_page("Customer")` → create → back |
-| `"Cannot delete: record has related opportunities"` | حذف Customer/Contact که فرصت دارد | ابتدا فرصت‌ها را `Closed Lost` یا حذف کنید |
-| `"Attachment too large"` | فایل > ۱۰MB | "فایل باید کمتر از ۱۰ مگابایت باشد. فایل را فشرده کنید." |
-| `"Permission denied: Administrator role required"` | دسترسی به `/user` یا `/auditlog` | "این عملیات نیاز به نقش Administrator دارد." |
-| `"Lost reason is required"` | Stage = Closed Lost بدون lostReason | set_field(lostReason="...") قبل از Save |
-| `"Follow-up date is required"` | followUpRequired=true بدون followUpDate | set_field(followUpDate="...") |
-| `"Lead must be qualified before conversion"` | Lead.Status ≠ Qualified | ابتدا set_field(status="Qualified") |
-| `"Opportunity must be Closed Won to create sale"` | Stage ≠ Closed Won | ابتدا فرصت را Close Won کنید |
-| `"Activity must be linked to exactly one entity"` | هیچ Customer/Contact/Lead/Opportunity انتخاب نشده | یکی از lookupها را پر کنید |
-| `"Email format invalid"` | فرمت ایمیل نادرست | "فرمت ایمیل معتبر وارد کنید (مثال: user@domain.com)" |
+| خطا / وضعیت | علت | اقدام مناسب دستیار |
+|-------------|-----|--------------------|
+| `Required field '...' is empty` | فیلد اجباری در فرم پر نشده است | از کاربر مقدار را با `ask_user` بپرسید و با `set_field` یا `open_combo` پر کنید |
+| `Maximum file size is 10 MB` | فایل پیوست بزرگ‌تر از ۱۰ مگابایت است | به کاربر اطلاع دهید فایل باید حداکثر ۱۰ مگابایت باشد |
+| `Unknown or blocked page` | مسیر در فهرست صفحات مسدود است (`/user`, `/auditlog`, `/import`, `/emailtemplate`, `/account`) | انجام این ناوبری مجاز نیست؛ به کاربر اطلاع دهید |
+| `Destructive action requires an explicit targetName` | درخواست حذف بدون نام دقیق رکورد بوده است | نام یا شناسه دقیق رکورد را از کاربر بخواهید |
 
 ---
 
@@ -658,42 +612,27 @@ erDiagram
     Customer ||--o{ Contact : "has (1:N)"
     Customer ||--o{ Opportunity : "has (1:N)"
     Customer ||--o{ SupportCase : "has (1:N)"
-    Customer ||--o{ Address : "has (1:N)"
+    Customer }o--|| Address : "located_at"
     Customer ||--o{ Activity : "has (1:N)"
     Customer ||--o{ Communication : "has (1:N)"
     Customer ||--o{ Sale : "has (1:N)"
-    
-    Lead }|--|| Opportunity : "converts_to (1:1)"
+
+    Lead }o--o| Opportunity : "links_to"
     Lead ||--o{ Activity : "has (1:N)"
     Lead ||--o{ Communication : "has (1:N)"
-    
+
     Opportunity ||--o{ Activity : "has (1:N)"
     Opportunity ||--o{ Communication : "has (1:N)"
-    Opportunity }|--|| Sale : "closes_as (1:1)"
-    
+
     Contact ||--o{ Activity : "has (1:N)"
     Contact ||--o{ Communication : "has (1:N)"
-    Contact ||--o{ SupportCase : "has (1:N)"
-    
-    Product ||--o{ Sale : "line_items (1:N)"
-    Product }|--|| ProductCategory : "belongs_to (N:1)"
-    
-    Service ||--o{ SupportCase : "related (1:N)"
-    Service }|--|| ServiceCategory : "belongs_to (N:1)"
-    
-    Vendor ||--o{ Product : "supplies (1:N)"
-    
-    User ||--o{ Opportunity : "assigned (1:N)"
-    User ||--o{ SupportCase : "assigned (1:N)"
-    User ||--o{ Activity : "created_by (1:N)"
-    User ||--o{ Communication : "created_by (1:N)"
-    
+    Contact }o--o{ Reward : "has (M:N)"
+
+    Product }o--o{ ProductCategory : "categorized_in"
+    Service }o--o{ ServiceCategory : "categorized_in"
+    Vendor }o--|| Address : "located_at"
+
     Tag ||--o{ EntityTag : "tagged (1:N)"
-    Customer }|--o{ EntityTag : "tagged (1:N)"
-    Contact }|--o{ EntityTag : "tagged (1:N)"
-    Opportunity }|--o{ EntityTag : "tagged (1:N)"
-    Lead }|--o{ EntityTag : "tagged (1:N)"
-    SupportCase }|--o{ EntityTag : "tagged (1:N)"
 ```
 
 ---
@@ -702,13 +641,10 @@ erDiagram
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+K` | جستجوی سراسری (Global Search) |
-| `Alt+N` | رکورد جدید (در صفحات لیست) |
-| `Escape` | بستن دیالوگ / پنل دستیار / منو |
-| `Enter` (در چت دستیار) | ارسال پیام |
-| `Shift+Enter` (در چت دستیار) | خط جدید |
+| `Escape` | بستن دیالوگ / منوی باز |
+| `Enter` (در چت دستیار) | ارسال پیام یا پاسخ به سوال دستیار |
+| `Shift+Enter` (در چت دستیار) | خط جدید در کادر پیام |
 | `Tab` / `Shift+Tab` | ناوبری بین فیلدها |
-| `Ctrl+S` (در دیالوگ فرم) | ذخیره (اگر پشتیبانی شود) |
 
 ---
 

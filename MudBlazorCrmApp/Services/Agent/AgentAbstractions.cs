@@ -7,6 +7,7 @@ namespace MudBlazorCrmApp.Services.Agent;
 public interface IAgentRateLimiter
 {
     bool TryAcquire(string userKey, int limitPerMinute);
+    bool TryAcquireWindow(string key, int limit, TimeSpan window) => TryAcquire(key, limit);
 }
 
 public interface IAgentDataReader
@@ -64,23 +65,26 @@ public sealed class AgentUsageCounter
 
 public sealed class MemoryCacheRateLimiter(IMemoryCache cache) : IAgentRateLimiter
 {
-    public bool TryAcquire(string userKey, int limitPerMinute)
+    public bool TryAcquire(string userKey, int limitPerMinute) =>
+        TryAcquireWindow($"agent_rl:{userKey}", limitPerMinute, TimeSpan.FromMinutes(1));
+
+    public bool TryAcquireWindow(string key, int limit, TimeSpan window)
     {
-        var lazyQueue = cache.GetOrCreate($"agent_rl:{userKey}", entry =>
+        var lazyQueue = cache.GetOrCreate(key, entry =>
         {
-            entry.SlidingExpiration = TimeSpan.FromMinutes(5);
+            entry.SlidingExpiration = window > TimeSpan.FromMinutes(5) ? window : TimeSpan.FromMinutes(5);
             return new Lazy<Queue<DateTimeOffset>>(() => new Queue<DateTimeOffset>());
         })!;
 
         var queue = lazyQueue.Value;
         var now = DateTimeOffset.UtcNow;
-        var cutoff = now.AddMinutes(-1);
+        var cutoff = now - window;
         lock (queue)
         {
             while (queue.Count > 0 && queue.Peek() < cutoff)
                 queue.Dequeue();
 
-            if (queue.Count >= limitPerMinute)
+            if (queue.Count >= limit)
                 return false;
 
             queue.Enqueue(now);

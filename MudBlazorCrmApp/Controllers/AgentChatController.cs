@@ -25,9 +25,29 @@ public partial class AgentChatController(
     [HttpGet("")]
     public async Task<ActionResult<AgentChatListResponse>> ListAsync(CancellationToken ct)
     {
-        if (!optionsAccessor.Value.Enabled) return NotFound();
+        var opts = optionsAccessor.Value;
+        opts.Normalize();
+        if (!opts.Enabled) return NotFound();
 
         var userId = User.GetAgentUserKey();
+        if (opts.HistoryDays > 0)
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-opts.HistoryDays);
+            var expiredChats = await db.AgentChat
+                .Where(c => c.UserId == userId && c.UpdatedDate < cutoff)
+                .ToListAsync(ct);
+            if (expiredChats.Count > 0)
+            {
+                var expiredKeys = expiredChats.Select(c => c.ChatKey).ToList();
+                var expiredTasks = await db.AgentTask
+                    .Where(t => t.UserId == userId && expiredKeys.Contains(t.ChatKey))
+                    .ToListAsync(ct);
+                if (expiredTasks.Count > 0) db.AgentTask.RemoveRange(expiredTasks);
+                db.AgentChat.RemoveRange(expiredChats);
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
         var chats = await db.AgentChat
             .Where(c => c.UserId == userId)
             .OrderByDescending(c => c.UpdatedDate)

@@ -8,25 +8,6 @@ using Microsoft.Extensions.Options;
 
 namespace MudBlazorCrmApp.Services.Agent;
 
-public sealed record AttachmentRecord(
-    string Id,
-    string UserKey,
-    string ChatKey,
-    string FileName,
-    string Kind,
-    long SizeBytes,
-    long MemoryBytes,
-    string Hash,
-    string Summary,
-    DateTime ExpiresUtc,
-    List<AttachmentSheet> Sheets,
-    string? RawText,
-    byte[]? ImageBytes,
-    string? MediaType,
-    byte[]? RawBytes = null);
-
-public sealed record AttachmentSheet(string Name, bool Hidden, List<string> Headers, List<string[]> Rows);
-
 public sealed partial class AgentAttachmentService(
     IServiceScopeFactory scopeFactory,
     IAgentRateLimiter rateLimiter,
@@ -87,7 +68,7 @@ public sealed partial class AgentAttachmentService(
             var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
             var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             var expires = DateTime.UtcNow.Add(Retention);
-            var memBytes = EstimateMemoryBytes(bytes.LongLength, parsed.Sheets, parsed.RawText, parsed.ImageBytes);
+            var memBytes = EstimateMemoryBytes(bytes.LongLength, parsed.Sheets, parsed.RawText);
             var rec = new AttachmentRecord(id, userKey, chatKey, safeName, parsed.Kind, bytes.LongLength, memBytes, hash,
                 parsed.Summary, expires, parsed.Sheets, parsed.RawText, parsed.ImageBytes, parsed.MediaType, bytes);
 
@@ -168,7 +149,8 @@ public sealed partial class AgentAttachmentService(
 
         using var scope = scopeFactory.CreateScope();
         var llmProvider = scope.ServiceProvider.GetRequiredService<IAgentLlmProvider>();
-        var res = await llmProvider.CompleteAsync(messages, tools: null, ct);
+        var modelOverride = rec.Kind == "Image" ? optionsAccessor.Value.VisionModel : optionsAccessor.Value.FastModel;
+        var res = await llmProvider.CompleteAsync(messages, tools: null, modelOverride, ct);
         AgentCostCalculator.Compute(res.Usage, optionsAccessor.Value);
         if (res.Error != null)
             return (JsonSerializer.Serialize(new { ok = false, error = res.Error }), res.Usage);
@@ -346,12 +328,11 @@ public sealed partial class AgentAttachmentService(
         }
     }
 
-    private static long EstimateMemoryBytes(long rawSize, List<AttachmentSheet> sheets, string? rawText, byte[]? img)
+    private static long EstimateMemoryBytes(long rawSize, List<AttachmentSheet> sheets, string? rawText)
     {
         var textBytes = (long)(rawText?.Length ?? 0) * 2;
-        var imgBytes = img?.LongLength ?? 0;
         var sheetBytes = sheets.Sum(s => s.Rows.Sum(r => r.Sum(c => (long)c.Length * 2 + 16)));
-        return Math.Max(rawSize, textBytes + imgBytes + sheetBytes);
+        return rawSize + textBytes + sheetBytes;
     }
 
     private void PurgeExpired()

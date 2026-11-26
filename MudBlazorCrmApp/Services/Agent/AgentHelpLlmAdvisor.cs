@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Options;
 
 namespace MudBlazorCrmApp.Services.Agent;
 
@@ -10,7 +11,8 @@ namespace MudBlazorCrmApp.Services.Agent;
 public sealed class AgentHelpLlmAdvisor(
     IAgentLlmProvider provider,
     IAgentHelpCatalog helpCatalog,
-    ILogger<AgentHelpLlmAdvisor> logger)
+    ILogger<AgentHelpLlmAdvisor> logger,
+    IOptions<AgentOptions>? optionsAccessor = null)
 {
     public async Task<string> ExtractKeywordsAsync(string question, CancellationToken ct)
     {
@@ -58,15 +60,16 @@ public sealed class AgentHelpLlmAdvisor(
 
     private static string ExtractGoalLine(string raw)
     {
-        var line = raw.Split('\n').FirstOrDefault(l => l.StartsWith("Goal:", StringComparison.OrdinalIgnoreCase));
-        return string.IsNullOrWhiteSpace(line) ? (raw.Length > 400 ? raw[..400] : raw) : line[5..].Trim();
+        var goal = AgentServerGuard.ExtractGoalText(raw.TrimStart());
+        return goal.Length > 400 ? goal[..400] : goal;
     }
 
     private async Task<(string? Text, AgentUsageModel Usage)> CompleteTextSideCallAsync(List<JsonObject> messages, CancellationToken ct)
     {
         try
         {
-            var result = await provider.CompleteAsync(messages, tools: null, ct);
+            var fastModel = optionsAccessor?.Value.FastModel;
+            var result = await provider.CompleteAsync(messages, tools: null, fastModel, ct);
             if (result.Error != null || string.IsNullOrWhiteSpace(result.AssistantJson))
                 return (null, result.Usage);
 

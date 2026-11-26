@@ -567,6 +567,99 @@ public class AgentExtendedTests
         Assert.Null(prereqGuard.CheckBeforeExecute("read_data", """{"source":"customers"}""", JsonDocument.Parse("""{"source":"customers"}""").RootElement));
     }
 
+    [Fact]
+    public async Task Wave3ReviewFixes_VerifyWrappedHowToCodeFencesAndDailyCap()
+    {
+        // 1. IsHowToQuestion recognizes Goal-wrapped client messages (even with attachment prefixes)
+        var wrapped = AgentClientTranscriptHelper.BuildInitialMessages([], "[att:0123456789abcdef0123456789abcdef \"note.txt\", Text]\nچطور مشتری جدید ثبت کنم؟", "{}");
+        var provider = new SequenceLlmProvider("""{"role":"assistant","content":"راهنما"}""");
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var svc = new AgentService(
+            provider,
+            new MemoryCacheRateLimiter(cache),
+            [],
+            Options.Create(new AgentOptions { Enabled = true, MaxStepsPerDay = 1 }),
+            NullLogger<AgentService>.Instance);
+
+        var res1 = await svc.StepAsync(new AgentStepRequestModel { Messages = wrapped }, "daily-u1", CancellationToken.None);
+        Assert.Null(res1.Error);
+        Assert.NotNull(provider.LastTools);
+        Assert.Equal(AgentToolSchemas.GetHowToTools().Length, provider.LastTools!.Length);
+
+        // 2. MaxStepsPerDay enforces daily cap
+        var res2 = await svc.StepAsync(new AgentStepRequestModel { Messages = wrapped }, "daily-u1", CancellationToken.None);
+        Assert.Contains("Daily agent step limit", res2.Error);
+
+        // 3. SectionParser does not split headers inside fenced code blocks & GetPage combines H2+H3 when parent matched
+        var tempRoot = Path.Combine(Path.GetTempPath(), "crm_fence_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tempRoot, "HelpDocs"));
+        try
+        {
+            File.WriteAllText(Path.Combine(tempRoot, "HelpDocs", "fence.md"), """
+                ## Real Section
+                Intro line.
+                ### Sub One
+                Sub content.
+                ```markdown
+                ## Fake Header Inside Code
+                ### Fake Subheader Inside Code
+                ```
+                Still inside Sub One.
+                """);
+            var help = new AgentHelpService(new FakeHostEnv(tempRoot));
+            Assert.Null(help.GetPage("Fake Header"));
+            var real = help.GetPage("Real Section");
+            Assert.NotNull(real);
+            Assert.Contains("Still inside Sub One", real!.Content);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+
+        // 4. AgentHelpLlmAdvisor extracts real question past [att:...] and BuildInitialContextAsync runs on multi-turn new tasks
+        var advisorProvider = new CapturingLlmProvider("""{"role":"assistant","content":"customer add"}""");
+        var tempHelpDir = Path.Combine(Path.GetTempPath(), "crm_adv_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tempHelpDir, "HelpDocs"));
+        try
+        {
+            File.WriteAllText(Path.Combine(tempHelpDir, "HelpDocs", "guide.md"), "## Customer Add\nClick Add on /Customer.");
+            var advisor = new AgentHelpLlmAdvisor(advisorProvider, new AgentHelpService(new FakeHostEnv(tempHelpDir)), NullLogger<AgentHelpLlmAdvisor>.Instance);
+            var (autoSummary, _) = await advisor.BuildAutoHelpContextAsync("Goal: [att:0123456789abcdef0123456789abcdef \"a.txt\", Text]\nچطور مشتری جدید ثبت کنم؟\nDate: 2026-11-27", CancellationToken.None);
+            Assert.NotNull(autoSummary);
+            Assert.Contains("چطور مشتری جدید ثبت کنم", advisorProvider.FirstUserPrompt);
+
+            var multiTurnMsgs = AgentClientTranscriptHelper.BuildInitialMessages(
+                [new MudBlazorCrmApp.Shared.Blazor.Services.AgentClientService.AgentChatEntry("user", "سلام"), new MudBlazorCrmApp.Shared.Blazor.Services.AgentClientService.AgentChatEntry("assistant", "سلام!")],
+                "چطور مشتری جدید ثبت کنم؟",
+                "{}");
+            var multiSvc = new AgentService(
+                advisorProvider,
+                new MemoryCacheRateLimiter(cache),
+                [],
+                Options.Create(new AgentOptions { Enabled = true }),
+                NullLogger<AgentService>.Instance,
+                helpAdvisor: advisor);
+            var multiRes = await multiSvc.StepAsync(new AgentStepRequestModel { Messages = multiTurnMsgs }, "multi-u1", CancellationToken.None);
+            Assert.Contains(multiRes.Prior, p => p.Contains("Relevant CRM Guide Context", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(tempHelpDir, recursive: true);
+        }
+    }
+
+    private sealed class CapturingLlmProvider(string response) : IAgentLlmProvider
+    {
+        public string FirstUserPrompt { get; private set; } = string.Empty;
+        public Task<LlmCallResult> CompleteAsync(IReadOnlyList<JsonObject> messages, JsonElement[]? tools, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(FirstUserPrompt))
+                FirstUserPrompt = messages.LastOrDefault(m => m["role"]?.GetValue<string>() == "user")?["content"]?.GetValue<string>() ?? "";
+            return Task.FromResult(new LlmCallResult(response, new AgentUsageModel { Calls = 1, InputTokens = 10, OutputTokens = 5 }, null));
+        }
+    }
+
     private sealed class DummyScopeFactory : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory
     {
         public Microsoft.Extensions.DependencyInjection.IServiceScope CreateScope() => throw new NotSupportedException();

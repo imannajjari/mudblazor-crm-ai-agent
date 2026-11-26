@@ -177,4 +177,16 @@
 2. **قرارداد فرانت/بک و پایداری حلقه:**
    - یکسان‌سازی اسکیمای ابزارها (`upload_file_to_screen` با `attachmentId`، `chatKey` از context، `fact_id`، `ask_user` با `options`، تکمیل `HowToTools`)، پیاده‌سازی `AppendLedger` + Loop Detection کلاینت + `[final call]` پیش‌دستانه، `replacedDeleteGuard`، `autoModeAdviceGuard`، `filterRestore`، اصلاح `ModelSnapshot` مایگریشن `AddAgentKnowledge`، و جمع‌آوری Usage ابزارهای جانبی با `AgentUsageCounter`.
 3. **تکمیل قابلیت‌های مرجع و تضمین کیفیت E2E:**
-   - اجرای موازی گام اول + `prior` برای Help/Knowledge، `HelpSessionStore`/`AgentHelpHealth`/BM25، حالت تصویر واقعی `look_at_screen` + `AskAttachmentAsync` تصویری، `AgentTableBudget` + پیکسل‌چک تصاویر، `HistoryDays` Purge، و پیاده‌سازی Contract Tests + سوئیت واقعی Playwright (`automation-spec.md` + `safety-set.md`).
+   - اجرا: اجرای موازی گام اول + `prior` برای Help/Knowledge، `HelpSessionStore`/`AgentHelpHealth`/BM25، حالت تصویر واقعی `look_at_screen` + `AskAttachmentAsync` تصویری، `AgentTableBudget` + پیکسل‌چک تصاویر، `HistoryDays` Purge، و پیاده‌سازی Contract Tests + سوئیت واقعی Playwright (`automation-spec.md` + `safety-set.md`).
+
+---
+
+## وضعیت رفع شکاف‌ها (بروزرسانی 2026-11-27 — Wave 1، Wave 2 و PR #1)
+
+| حوزه | موارد برطرف‌شده در `Wave 1` (`2a6795d`)، `Wave 2` (`a2ee249`) و `PR #1` | موارد باقی‌مانده برای گام‌های بعدی |
+|---|---|---|
+| **امنیت و مجوزها (`S-C1`–`S-C5`, `S-H1`–`S-H11`)** | گاردهای دوزبانه و دسترسی دانش (`AgentKnowledgeGuard`, `AgentKnowledgeWriteGuard`)؛ محدودسازی `AllowAlways` به `light`/`export`؛ انتقال `<InputFile>` و انتخابگر `Mode` به داخل پنل با قفل `IsRunning`؛ فعال‌سازی `RedactAttachmentBlocks` و پاک‌سازی پیوست‌ها در `AgentChatController`؛ `replacedDeleteGuard`، `DeleteTaskRequested`، `autoModeAdviceGuard`، `wrongRecordBlock`، `fileValueBlock`؛ مسدودسازی `/auditlog` و `/import` و `[Authorize(Roles="Administrator")]` در `AuditLogController`؛ اعتبارسنجی `LookAsync`؛ `AgentTableBudget` و محدودیت ابعاد تصویر؛ محدودیت بایت/تایم‌اوت Loopback؛ گارد خطای تکراری و `IsHowToQuestion` با پشتیبانی از `Goal:` و `[att:...]` | پیاده‌سازی `AnthropicAgentLlmProvider` و `AgentLlmProviderFactory` برای انتخاب پویا از `AgentOptions.Provider`؛ تکمیل `BuildTargetModel` در `20261126120000_AddAgentKnowledge.Designer.cs` |
+| **فرانت‌اند و درایور DOM** | اصلاح `SearchField` برای `leads` و `todo_tasks`؛ پشتیبانی `MudDatePicker`/`MudAutocomplete`/`LookupTermHandler`/`captureVisibleText`؛ افزودن ابزارهای `scan_menus`، `scan_tabs`، `scan_context_menu`، `scroll_grid`، `select_tree_node`، `search_settings`، `clear_filters`، `sort_grid`، `right_click`، `upload_file_to_screen` و `BusinessToolRegistry`؛ پیاده‌سازی `AgentLoopGuards` و `AppendLedger` | پشتیبانی کامل `multiSelect` (افزودن/حذف تکی)، `MudDatePicker` `Editable="true"` روی صفحات قدیمی، و بومی‌سازی کامل دکمه‌های باقی‌مانده در صفحات `List*.razor` |
+| **پرامپت، Help و هزینه** | بازنویسی و تکمیل `AgentPrompts.MainSystemPrompt`؛ جمع‌آوری مصرف جانبی با `AgentUsageCounter`؛ چانک‌سازی H2/H3 راهنما (`SectionParser`, `HelpSection`, `AgentHelpService.GetPage`) با محافظ code-fence و بازنویسی دقیق بخش ۱۵ `crm-guide.md`؛ فعال‌سازی `FastModel`، `VisionModel`، `MaxStepsPerDay` و `HistoryDays`؛ پشتیبانی `BuildInitialContextAsync` در گفتگوهای چندمرحله‌ای | جدول و کش قیمت‌گذاری چندنرخی `AgentModelPrice`؛ رتبه‌بندی BM25 در `AgentHelpService` و `HelpSessionStore`؛ سوئیت کامل Playwright `AGENT_ASK` |
+
+*وضعیت تست واحد پس از PR #1: **۶۷/۶۷ پاس (`dotnet test`)**.*

@@ -5,8 +5,6 @@ using MudBlazorCrmApp.Services.Agent;
 
 namespace MudBlazorCrmApp.Controllers;
 
-public sealed record AttachmentUploadRequest(string ChatKey, string FileName, string Content);
-
 [Authorize]
 [Route("api/agent/attachment")]
 [ApiController]

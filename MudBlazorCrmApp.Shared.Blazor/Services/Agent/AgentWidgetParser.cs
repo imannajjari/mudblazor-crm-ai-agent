@@ -2,10 +2,6 @@ using System.Text.RegularExpressions;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
 
-public sealed record AgentKpiWidget(string Title, string Value, string? Trend);
-public sealed record AgentActionWidget(string Label, string Route);
-public sealed record AgentParsedMessage(string MarkdownText, List<AgentKpiWidget> Kpis, List<AgentActionWidget> Actions);
-
 /// <summary>
 /// Extracts optional [[kpi|Title|Value|Trend]] and [[action|Label|Route]] mini-widget directives from assistant text.
 /// </summary>

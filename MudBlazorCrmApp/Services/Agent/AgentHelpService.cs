@@ -40,9 +40,15 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
 
     public HelpSearchHit? GetPage(string titleQuery)
     {
-        var sec = _sections.FirstOrDefault(s =>
-            s.Title.Contains(titleQuery, StringComparison.OrdinalIgnoreCase));
-        return sec == null ? null : new HelpSearchHit(sec.Title, sec.Content, 1);
+        var matches = _sections
+            .Where(s => s.Title.Contains(titleQuery, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (matches.Count == 0) return null;
+        if (matches.Count == 1) return new HelpSearchHit(matches[0].Title, matches[0].Content, 1);
+
+        var combined = string.Join("\n\n", matches.Select(m => $"### {m.Title}\n{m.Content}"));
+        if (combined.Length > 8000) combined = combined[..8000];
+        return new HelpSearchHit(matches[0].Title, combined, 1);
     }
 
     private static List<HelpSection> LoadSections(string docsDir)
@@ -50,7 +56,7 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
         var result = new List<HelpSection>();
         if (!Directory.Exists(docsDir)) return result;
 
-        foreach (var file in Directory.GetFiles(docsDir, "*.md"))
+        foreach (var file in Directory.GetFiles(docsDir, "*.md").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
         {
             var parser = new SectionParser(Path.GetFileNameWithoutExtension(file));
             foreach (var line in File.ReadAllLines(file))
@@ -61,7 +67,7 @@ public sealed partial class AgentHelpService : IAgentHelpCatalog
         return result;
     }
 
-    private static IEnumerable<string> Tokenize(string text)
+    internal static IEnumerable<string> Tokenize(string text)
     {
         foreach (Match m in TokenRegex().Matches(text))
             if (m.Value.Length >= 2)

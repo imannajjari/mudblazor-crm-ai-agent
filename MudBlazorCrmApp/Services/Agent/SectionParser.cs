@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace MudBlazorCrmApp.Services.Agent;
 
 /// <summary>
@@ -8,10 +6,11 @@ namespace MudBlazorCrmApp.Services.Agent;
 /// H3 (###) becomes a child section titled "Parent > Child" so help search
 /// returns precise, lower-token chunks instead of one giant section.
 /// </summary>
-internal sealed partial class SectionParser
+internal sealed class SectionParser
 {
     private string _parentTitle;
     private string _currentTitle;
+    private bool _inCodeFence;
     private readonly List<string> _currentBody = new();
     private readonly List<HelpSection> _result = new();
 
@@ -23,7 +22,14 @@ internal sealed partial class SectionParser
 
     public void Feed(string line)
     {
-        if (!TryParseHeader(line, out var level, out var title))
+        if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+        {
+            _inCodeFence = !_inCodeFence;
+            _currentBody.Add(line);
+            return;
+        }
+
+        if (_inCodeFence || !TryParseHeader(line, out var level, out var title))
         {
             _currentBody.Add(line);
             return;
@@ -50,20 +56,20 @@ internal sealed partial class SectionParser
             _result.Add(new HelpSection(
                 _currentTitle,
                 bodyText,
-                Tokenize(_currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+                AgentHelpService.Tokenize(_currentTitle + " " + bodyText).ToHashSet(StringComparer.OrdinalIgnoreCase)));
     }
 
     private static bool TryParseHeader(string line, out int level, out string title)
     {
         level = 0;
         title = string.Empty;
-        if (line.StartsWith("## "))
+        if (line.StartsWith("## ", StringComparison.Ordinal))
         {
             level = 2;
             title = line[3..].Trim();
             return true;
         }
-        if (line.StartsWith("### "))
+        if (line.StartsWith("### ", StringComparison.Ordinal))
         {
             level = 3;
             title = line[4..].Trim();
@@ -71,14 +77,4 @@ internal sealed partial class SectionParser
         }
         return false;
     }
-
-    private static IEnumerable<string> Tokenize(string text)
-    {
-        foreach (Match m in TokenRegex().Matches(text))
-            if (m.Value.Length >= 2)
-                yield return m.Value;
-    }
-
-    [System.Text.RegularExpressions.GeneratedRegex(@"[\p{L}\p{N}_-]+")]
-    private static partial System.Text.RegularExpressions.Regex TokenRegex();
 }

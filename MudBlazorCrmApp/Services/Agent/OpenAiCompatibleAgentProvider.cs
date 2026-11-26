@@ -13,6 +13,13 @@ public interface IAgentLlmProvider
         IReadOnlyList<JsonObject> messages,
         JsonElement[]? tools,
         CancellationToken cancellationToken);
+
+    Task<LlmCallResult> CompleteAsync(
+        IReadOnlyList<JsonObject> messages,
+        JsonElement[]? tools,
+        string? modelOverride,
+        CancellationToken cancellationToken) =>
+        CompleteAsync(messages, tools, cancellationToken);
 }
 
 public sealed record LlmCallResult(
@@ -25,9 +32,16 @@ public sealed class OpenAiCompatibleAgentProvider(
     IOptions<AgentOptions> optionsAccessor,
     ILogger<OpenAiCompatibleAgentProvider> logger) : IAgentLlmProvider
 {
+    public Task<LlmCallResult> CompleteAsync(
+        IReadOnlyList<JsonObject> messages,
+        JsonElement[]? tools,
+        CancellationToken cancellationToken) =>
+        CompleteAsync(messages, tools, null, cancellationToken);
+
     public async Task<LlmCallResult> CompleteAsync(
         IReadOnlyList<JsonObject> messages,
         JsonElement[]? tools,
+        string? modelOverride,
         CancellationToken cancellationToken)
     {
         var options = optionsAccessor.Value;
@@ -38,9 +52,10 @@ public sealed class OpenAiCompatibleAgentProvider(
             return new LlmCallResult(null, new AgentUsageModel(), "Agent API key is not configured on the server.");
         }
 
+        var selectedModel = string.IsNullOrWhiteSpace(modelOverride) ? options.Model : modelOverride.Trim();
         var payload = new JsonObject
         {
-            ["model"] = options.Model,
+            ["model"] = selectedModel,
             ["temperature"] = 0.2,
             ["max_tokens"] = options.MaxTokens,
             ["messages"] = new JsonArray(messages.Select(m => m.DeepClone()).ToArray())

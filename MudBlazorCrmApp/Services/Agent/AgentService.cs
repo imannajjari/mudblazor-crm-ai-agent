@@ -17,7 +17,6 @@ public sealed class AgentService(
     AgentUsageCounter? usageCounter = null)
 {
     private const int MaxTranscriptMessages = 400;
-    private const int MaxTotalMessageChars = 4_000_000;
     private const int MaxServerHops = 4;
     private const int MaxLookTextChars = 30_000;
     private const int MaxLookQuestionChars = 2_000;
@@ -38,6 +37,9 @@ public sealed class AgentService(
 
         if (!rateLimiter.TryAcquire(userKey, options.MaxCallsPerUserPerMinute))
             return new AgentStepResponseModel { Error = "Too many agent requests in a minute. Wait a moment and try again." };
+
+        if (options.MaxStepsPerDay > 0 && !rateLimiter.TryAcquireWindow($"agent_day:{userKey}", options.MaxStepsPerDay, TimeSpan.FromDays(1)))
+            return new AgentStepResponseModel { Error = "Daily agent step limit reached. Try again tomorrow." };
 
         if (!TryParseMessages(request.Messages, out var parsedMessages))
             return new AgentStepResponseModel { Error = "The conversation sent to the agent is not valid." };
@@ -84,10 +86,14 @@ public sealed class AgentService(
         CancellationToken ct)
     {
         var extraNotes = new List<string>();
-        if (parsedMessages.Count != 1)
+        var lastUser = parsedMessages.Count > 0 && TryGetString(parsedMessages[^1]["role"]) == "user"
+            ? TryGetString(parsedMessages[^1]["content"]) ?? ""
+            : "";
+        var isFirstStepOfTask = parsedMessages.Count == 1 || lastUser.StartsWith("Goal:", StringComparison.OrdinalIgnoreCase);
+        if (!isFirstStepOfTask)
             return (AgentPrompts.MainSystemPrompt, extraNotes);
 
-        var firstUserMsg = TryGetString(parsedMessages[0]["content"]) ?? "";
+        var firstUserMsg = AgentServerGuard.ExtractGoalText(lastUser.TrimStart());
 
         if (isHowTo && helpAdvisor != null)
         {
@@ -320,7 +326,8 @@ public sealed class AgentService(
             new() { ["role"] = "user", ["content"] = string.IsNullOrWhiteSpace(request.Image) ? (JsonNode)JsonValue.Create($"Question: {request.Question}\n\nVisible screen text:\n{screenText}")! : userContent }
         };
 
-        var result = await provider.CompleteAsync(messages, tools: null, cancellationToken);
+        var modelOverride = string.IsNullOrWhiteSpace(request.Image) ? null : options.VisionModel;
+        var result = await provider.CompleteAsync(messages, tools: null, modelOverride, cancellationToken);
         AgentCostCalculator.Compute(result.Usage, options);
         if (result.Error != null)
             return new AgentLookResponseModel { Error = result.Error, Usage = result.Usage };
@@ -343,21 +350,8 @@ public sealed class AgentService(
         return new AgentLookResponseModel { Text = answerText ?? string.Empty, Usage = result.Usage };
     }
 
-    public static bool TryParseMessages(IReadOnlyList<string>? rawMessages, out List<JsonObject> parsed)
-    {
-        parsed = [];
-        if (rawMessages == null) return false;
-        long totalChars = 0;
-        foreach (var raw in rawMessages)
-        {
-            if (raw != null)
-            {
-                totalChars += raw.Length;
-                if (totalChars > MaxTotalMessageChars) return false;
-            }
-        }
-        return AgentTranscriptValidator.TryParseMessages(rawMessages, MaxTranscriptMessages, out parsed);
-    }
+    public static bool TryParseMessages(IReadOnlyList<string>? rawMessages, out List<JsonObject> parsed) =>
+        AgentTranscriptValidator.TryParseMessages(rawMessages, MaxTranscriptMessages, out parsed);
 
     private static string? TryGetString(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
