@@ -20,14 +20,20 @@ public sealed class AgentPermissionGate
 {
     private readonly HashSet<string> _alwaysAllowed = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _declined = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _approvedDestructiveTargets = new(StringComparer.OrdinalIgnoreCase);
 
     public void ResetSession()
     {
         _alwaysAllowed.Clear();
         _declined.Clear();
+        _approvedDestructiveTargets.Clear();
     }
 
-    public void ClearTaskDeclines() => _declined.Clear();
+    public void ClearTaskDeclines()
+    {
+        _declined.Clear();
+        _approvedDestructiveTargets.Clear();
+    }
 
     public async Task<(bool Allowed, string? BlockReason)> AuthorizeAsync(
         AgentMode mode,
@@ -44,14 +50,12 @@ public sealed class AgentPermissionGate
         if (_declined.Contains(scopeKey))
             return (false, $"User previously declined '{actionText}'. Do not retry.");
 
-        // Destructive actions ALWAYS require confirmation and a verified targetName present in screen content
-        if (risk == "destructive" && (string.IsNullOrWhiteSpace(targetName) || !SnapshotContainsTarget(snapshotJson, targetName)))
+        if (risk == "destructive" && !ValidateDestructiveTarget(route, inDialog, targetName, snapshotJson))
             return (false, "Destructive action requires an explicit targetName present on screen.");
 
         var effectiveRisk = risk == "confirm" ? "save" : risk;
-        var needsPrompt = effectiveRisk switch
+        var needsPrompt = risk is "destructive" or "confirm" || effectiveRisk switch
         {
-            "destructive" => true, // Never auto-approve destructive actions without explicit user confirmation
             "read" => false,
             "save" or "write" => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey),
             _ => mode != AgentMode.Auto && !_alwaysAllowed.Contains(scopeKey) // Fail closed for unknown risk classifications
@@ -70,8 +74,22 @@ public sealed class AgentPermissionGate
 
         if (decision == PermissionDecision.AllowAlways && effectiveRisk != "destructive")
             _alwaysAllowed.Add(scopeKey);
+        if (effectiveRisk == "destructive" && !string.IsNullOrWhiteSpace(targetName))
+            _approvedDestructiveTargets.Add($"{route}|{targetName.Trim()}");
 
         return (true, null);
+    }
+
+    private bool ValidateDestructiveTarget(string route, bool inDialog, string? targetName, string snapshotJson)
+    {
+        if (string.IsNullOrWhiteSpace(targetName) || targetName.Trim().Length < 2)
+            return false;
+
+        if (SnapshotContainsTarget(snapshotJson, targetName))
+            return true;
+
+        var key = $"{route}|{targetName.Trim()}";
+        return inDialog && _approvedDestructiveTargets.Remove(key);
     }
 
     private static bool SnapshotContainsTarget(string snapshotJson, string targetName)
@@ -83,6 +101,9 @@ public sealed class AgentPermissionGate
             var root = doc.RootElement;
             if (root.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String &&
                 (t.GetString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (root.TryGetProperty("dialogText", out var dt) && dt.ValueKind == JsonValueKind.String &&
+                (dt.GetString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
                 return true;
 
             if (root.TryGetProperty("fields", out var fields) && fields.ValueKind == JsonValueKind.Array)

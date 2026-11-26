@@ -170,6 +170,7 @@ window.crmAgentDriver = (function () {
             url: window.location.pathname + window.location.search,
             title: cleanText(headingEl ? headingEl.innerText : document.title),
             inDialog: !!topDialog,
+            dialogText: topDialog ? cleanText(topDialog.querySelector('.mud-dialog-content')?.innerText || '') : '',
             tabs,
             fields: fields.slice(0, 40),
             grids,
