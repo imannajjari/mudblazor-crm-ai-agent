@@ -17,7 +17,6 @@ namespace MudBlazorCrmApp.Controllers;
 [EnableRateLimiting("Fixed")]
 public class UserController(UserManager<ApplicationUser> userManager, ILogger<UserController> logger) : ControllerBase
 {
-    private readonly UserManager<ApplicationUser> _userManager = userManager;
     private readonly ILogger<UserController> _logger = logger;
 
     [HttpGet("")]

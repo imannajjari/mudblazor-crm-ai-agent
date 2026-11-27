@@ -13,7 +13,7 @@ namespace MudBlazorCrmApp.Controllers;
 [ApiController]
 [Authorize]
 [EnableRateLimiting("Fixed")]
-public class CommunicationController(ApplicationDbContext ctx, ILogger<CommunicationController> logger) : ControllerBase
+public class CommunicationController(ApplicationDbContext ctx) : ControllerBase
 {
     [HttpGet("")]
     [EnableQuery]

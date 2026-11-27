@@ -1,4 +1,4 @@
-@inject AppService AppService
+﻿@inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @inject AppText L
@@ -16,11 +16,11 @@
             <MudNumericField @bind-Value="record.ZipCode" For="@(() => record.ZipCode)" Label="@L["FLD_ZIP_CODE"]" />
             <MudTextField @bind-Value="record.Country" For="@(() => record.Country)" Label="@L["FLD_COUNTRY"]" />
             <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Photo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
-                <ActivatorContent>
-                    <MudIconButton Color="Color.Info"
+                <CustomContent Context="fileUpload">
+                    <MudIconButton OnClick="@fileUpload.OpenFilePickerAsync" Color="Color.Info"
                                    Icon="@Icons.Material.Filled.PhotoCamera">
                     </MudIconButton>
-                </ActivatorContent>
+                </CustomContent>
             </MudFileUpload>
             @if (!string.IsNullOrEmpty(record.Photo))
             {

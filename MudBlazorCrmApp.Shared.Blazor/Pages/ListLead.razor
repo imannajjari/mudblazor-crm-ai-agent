@@ -47,8 +47,8 @@
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -182,7 +182,7 @@
         var dialogRef = await DialogService.ShowAsync<AddLead>(L["ADD_LEAD"], dialogOptions);
         var result = await dialogRef.Result;
 
-        if (!result.Canceled)
+        if (result is { Canceled: false })
         {
             await (grid?.ReloadServerData() ?? Task.CompletedTask);
         }
@@ -196,7 +196,7 @@
         var dialogRef = await DialogService.ShowAsync<UpdateLead>(L["UPD_LEAD"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
 
-        if (!result.Canceled)
+        if (result is { Canceled: false })
         {
             await (grid?.ReloadServerData() ?? Task.CompletedTask);
         }
@@ -256,9 +256,9 @@
             // Fetch all data from the OData service without any filters or restrictions
             result = await AppService.ListLeadODataAsync(null, null, null, null, true, "Address,Opportunity,Contact");
 
-            if (result != null && result?.Value != null)
+            if (result?.Value != null)
             {
-                var ar = result?.Value.ToList().Select(x => new
+                var ar = result.Value.ToList().Select(x => new
                 {
                         x.Id,
     x.Source,
@@ -266,9 +266,9 @@
     x.PotentialValue,
     x.Photo,
     x.Notes,
-     AddressCity = x.Address.City,
-     OpportunityStage = x.Opportunity.Stage,
-     ContactName = x.Contact.Name,
+     AddressCity = x.Address?.City,
+     OpportunityStage = x.Opportunity?.Stage,
+     ContactName = x.Contact?.Name,
 
                 });
 

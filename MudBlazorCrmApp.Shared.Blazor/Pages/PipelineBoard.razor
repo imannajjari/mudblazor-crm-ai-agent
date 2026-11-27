@@ -1,4 +1,4 @@
-@page "/pipeline"
+﻿@page "/pipeline"
 @implements IDisposable
 @inject AppService AppService
 @inject ISnackbar Snackbar
@@ -18,7 +18,7 @@
         @foreach (var stage in _stages)
         {
             <MudPaper Elevation="0" Class="pa-4 ma-4 d-flex flex-column mud-background-gray rounded-lg" Style="flex: 1 1 auto; min-width: 220px;">
-                <MudToolBar DisableGutters="true">
+                <MudToolBar Gutters="false">
                     <MudText Typo="Typo.subtitle1"><b>@stage</b></MudText>
                     <MudSpacer />
                     <MudText Typo="Typo.caption" Color="Color.Primary">@GetStageTotal(stage)</MudText>
@@ -150,7 +150,7 @@
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
         var dialogRef = await DialogService.ShowAsync<AddOpportunity>(L["ADD_OPPORTUNITY"], dialogOptions);
         var result = await dialogRef.Result;
-        if (!result.Canceled)
+        if (result is { Canceled: false })
         {
             await LoadDataAsync();
         }
@@ -162,7 +162,7 @@
         DialogOptions dialogOptions = new() { FullWidth = true, CloseOnEscapeKey = true };
         var dialogRef = await DialogService.ShowAsync<UpdateOpportunity>(L["UPD_OPPORTUNITY"], dialogParams, dialogOptions);
         var result = await dialogRef.Result;
-        if (!result.Canceled)
+        if (result is { Canceled: false })
         {
             await LoadDataAsync();
         }

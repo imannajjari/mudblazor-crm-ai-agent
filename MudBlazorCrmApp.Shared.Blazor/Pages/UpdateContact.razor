@@ -1,4 +1,4 @@
-@inject AppService AppService
+﻿@inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @inject IDialogService DialogService
@@ -54,11 +54,11 @@ else
                 <MudCheckBox @bind-Value="record.IsPrimary" Label="@L["FLD_PRIMARY_CONTACT"]" />
                 <MudCheckBox @bind-Value="record.DoNotContact" Label="@L["FLD_DO_NOT_CONTACT"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Photo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
-                    <ActivatorContent>
-                        <MudIconButton Color="Color.Info"
+                    <CustomContent Context="fileUpload">
+                        <MudIconButton OnClick="@fileUpload.OpenFilePickerAsync" Color="Color.Info"
                                        Icon="@Icons.Material.Filled.PhotoCamera">
                         </MudIconButton>
-                    </ActivatorContent>
+                    </CustomContent>
                 </MudFileUpload>
                 @if (!string.IsNullOrEmpty(record.Photo))
                 {

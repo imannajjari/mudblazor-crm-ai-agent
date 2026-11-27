@@ -34,7 +34,7 @@ internal static class ODataHelpers
         {
             var fieldType = filterDefinition.FieldType;
             var op = filterDefinition.Operator;
-            var property = GetDataMemberName<T>(filterDefinition.Column!.PropertyName);
+            var property = GetDataMemberName<T>(filterDefinition.Column!.PropertyName ?? string.Empty);
             var value = filterDefinition.Value;
 
             string? exp = null;

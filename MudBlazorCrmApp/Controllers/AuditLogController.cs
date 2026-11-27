@@ -12,7 +12,7 @@ namespace MudBlazorCrmApp.Controllers;
 [ApiController]
 [Authorize(Roles = "Administrator")]
 [EnableRateLimiting("Fixed")]
-public class AuditLogController(ApplicationDbContext ctx, ILogger<AuditLogController> logger) : ControllerBase
+public class AuditLogController(ApplicationDbContext ctx) : ControllerBase
 {
     /// <summary>
     /// Gets all audit logs with OData query support

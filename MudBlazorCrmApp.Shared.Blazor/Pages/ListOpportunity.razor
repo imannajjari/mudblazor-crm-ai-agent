@@ -40,8 +40,8 @@
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -225,9 +225,9 @@
             // Fetch all data from the OData service without any filters or restrictions
             result = await AppService.ListOpportunityODataAsync(null, null, null, null, true, null);
 
-            if (result != null && result?.Value != null)
+            if (result?.Value != null)
             {
-                var ar = result?.Value.ToList().Select(x => new
+                var ar = result.Value.ToList().Select(x => new
                 {
                         x.Id,
     x.EstimatedCloseDate,

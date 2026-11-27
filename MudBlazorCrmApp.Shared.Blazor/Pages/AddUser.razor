@@ -1,4 +1,4 @@
-@inject AppService AppService
+﻿@inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @attribute [Authorize]
@@ -19,11 +19,11 @@
             <MudTextField @bind-Value="registerModel.Title" For="@(() => registerModel.Title)" Label="@L["FLD_TITLE"]" />
             <MudTextField @bind-Value="registerModel.CompanyName" For="@(() => registerModel.CompanyName)" Label="@L["FLD_COMPANY_NAME"]" />
             <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => registerModel.Photo = await UploadImageAsync(args))" Accept=".png,.jpg,.jpeg">
-                <ActivatorContent>
-                    <MudIconButton Color="Color.Info"
+                <CustomContent Context="fileUpload">
+                    <MudIconButton OnClick="@fileUpload.OpenFilePickerAsync" Color="Color.Info"
                                    Icon="@Icons.Material.Filled.PhotoCamera">
                     </MudIconButton>
-                </ActivatorContent>
+                </CustomContent>
             </MudFileUpload>
             @if (!string.IsNullOrEmpty(registerModel.Photo))
             {

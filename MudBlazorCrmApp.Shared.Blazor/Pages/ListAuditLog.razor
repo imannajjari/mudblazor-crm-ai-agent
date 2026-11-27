@@ -1,4 +1,4 @@
-@page "/auditlog"
+﻿@page "/auditlog"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -68,7 +68,7 @@
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Visibility" Size="@Size.Small" Title="@L["UI_VIEW_DETAILS"]" OnClick="@(e => OnViewDetails(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Visibility" Size="@Size.Small" title="@L["UI_VIEW_DETAILS"]" OnClick="@(e => OnViewDetails(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -220,9 +220,9 @@
         {
             result = await AppService.ListAuditLogODataAsync(null, null, null, null, true, null);
 
-            if (result != null && result?.Value != null)
+            if (result?.Value != null)
             {
-                var ar = result?.Value.ToList().Select(x => new
+                var ar = result.Value.ToList().Select(x => new
                 {
                     x.Id,
                     x.Timestamp,

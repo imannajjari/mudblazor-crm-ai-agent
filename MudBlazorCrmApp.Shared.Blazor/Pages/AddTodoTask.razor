@@ -1,4 +1,4 @@
-@inject AppService AppService
+﻿@inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @inject AppText L
@@ -18,11 +18,11 @@
             <MudNumericField @bind-Value="record.UserId" For="@(() => record.UserId)" Label="@L["FLD_USER_ID"]" />
             <MudTextField Format="s" InputType="InputType.DateTimeLocal" @bind-Value="record.FollowupDate" For="@(() => record.FollowupDate)" Label="@L["FLD_FOLLOWUP_DATE"]" />
             <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Icon = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
-                <ActivatorContent>
-                    <MudIconButton Color="Color.Info"
+                <CustomContent Context="fileUpload">
+                    <MudIconButton OnClick="@fileUpload.OpenFilePickerAsync" Color="Color.Info"
                                    Icon="@Icons.Material.Filled.PhotoCamera">
                     </MudIconButton>
-                </ActivatorContent>
+                </CustomContent>
             </MudFileUpload>
             @if (!string.IsNullOrEmpty(record.Icon))
             {

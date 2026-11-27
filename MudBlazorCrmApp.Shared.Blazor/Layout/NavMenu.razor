@@ -1,4 +1,4 @@
-@using System.Security.Claims
+﻿@using System.Security.Claims
 @using MudBlazorCrmApp.Shared.Blazor.Components.Themes
 @inject AppService AppService
 @inject AuthenticationStateProvider AuthenticationStateProvider
@@ -8,7 +8,7 @@
 @inject AppText L
 @inject AgentClientService Agent
 
-<MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
+<MudThemeProvider @ref="mudThemeProvider" Theme="_theme" IsDarkMode="_isDarkMode" />
 <MudAppBar Color="Color.Inherit">
     <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())" />
     <MudText>@L["APP_TITLE"]</MudText>
@@ -185,7 +185,6 @@
 </MudDrawer>
 
 @code {
-    bool _dark = true;
     private bool isDarkMode;
     private MudThemeProvider? mudThemeProvider;
     private bool drawerOpen = false;

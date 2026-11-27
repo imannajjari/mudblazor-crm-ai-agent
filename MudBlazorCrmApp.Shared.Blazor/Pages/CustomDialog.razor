@@ -5,19 +5,19 @@
             <MudPaper Elevation="25" Class="pa-2 rounded-lg">
                 <MudGrid>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="PassedData.Name" Label="@L["FLD_NAME"]" Placeholder="@L["FLD_NAME"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.Name" Label="@L["FLD_NAME"]" Placeholder="@L["FLD_NAME"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="PassedData.Description" Label="@L["FLD_DESCRIPTION"]" Placeholder="@L["FLD_DESCRIPTION"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.Description" Label="@L["FLD_DESCRIPTION"]" Placeholder="@L["FLD_DESCRIPTION"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <MudTextField @bind-Value="PassedData.FollowupDate" Label="@L["FLD_FOLLOWUP_DATE"]" Placeholder="@L["FLD_FOLLOWUP_DATE"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.FollowupDate" Label="@L["FLD_FOLLOWUP_DATE"]" Placeholder="@L["FLD_FOLLOWUP_DATE"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <MudTextField @bind-Value="PassedData.DueDate" Label="@L["FLD_DUE_DATE"]" Placeholder="@L["FLD_DUE_DATE"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.DueDate" Label="@L["FLD_DUE_DATE"]" Placeholder="@L["FLD_DUE_DATE"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="PassedData.Notes" Label="@L["FLD_NOTES"]" Placeholder="@L["FLD_NOTES"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                        <MudTextField @bind-Value="PassedData.Notes" Label="@L["FLD_NOTES"]" Placeholder="@L["FLD_NOTES"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                     </MudItem>
                 </MudGrid>
             </MudPaper>
@@ -31,14 +31,14 @@
 
 
 @code {
-    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } 
+    [CascadingParameter] IMudDialogInstance? MudDialog { get; set; }
 
     [Parameter]
     public TodoTask PassedData { get; set; } = new TodoTask { };
 
     void Submit()
     {
-        MudDialog.Close<TodoTask>(PassedData);
+        MudDialog?.Close<TodoTask>(PassedData);
     }
-    void Cancel() => MudDialog.Cancel();
+    void Cancel() => MudDialog?.Cancel();
 }

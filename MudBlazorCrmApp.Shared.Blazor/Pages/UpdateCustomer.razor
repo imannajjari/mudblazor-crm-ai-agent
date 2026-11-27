@@ -1,4 +1,4 @@
-@inject AppService AppService
+﻿@inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 @inject AppText L
@@ -32,11 +32,11 @@ else
                 <MudTextField @bind-Value="record.Type" For="@(() => record.Type)" Label="@L["FLD_TYPE"]" />
                 <MudTextField @bind-Value="record.Industry" For="@(() => record.Industry)" Label="@L["FLD_INDUSTRY"]" />
                 <MudFileUpload T="IBrowserFile" FilesChanged="@(async args => record.Logo = await UploadImageAsync(args, 256, 256))" Accept=".png,.jpg,.jpeg">
-                    <ActivatorContent>
-                        <MudIconButton Color="Color.Info"
+                    <CustomContent Context="fileUpload">
+                        <MudIconButton OnClick="@fileUpload.OpenFilePickerAsync" Color="Color.Info"
                                        Icon="@Icons.Material.Filled.PhotoCamera">
                         </MudIconButton>
-                    </ActivatorContent>
+                    </CustomContent>
                 </MudFileUpload>
                 @if (!string.IsNullOrEmpty(record.Logo))
                 {

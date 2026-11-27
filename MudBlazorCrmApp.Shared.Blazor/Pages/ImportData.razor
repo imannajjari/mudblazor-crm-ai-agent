@@ -1,4 +1,4 @@
-@page "/import"
+﻿@page "/import"
 @inject AppService AppService
 @inject ISnackbar Snackbar
 @attribute [Authorize]
@@ -23,9 +23,9 @@
         </MudItem>
         <MudItem xs="12" md="6">
             <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".csv">
-                <ActivatorContent>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">@L["UI_SELECT_CSV"]</MudButton>
-                </ActivatorContent>
+                <CustomContent Context="fileUpload">
+                    <MudButton OnClick="@fileUpload.OpenFilePickerAsync" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">@L["UI_SELECT_CSV"]</MudButton>
+                </CustomContent>
             </MudFileUpload>
             @if (selectedFile != null)
             {

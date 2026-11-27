@@ -16,7 +16,7 @@ public class ThemeService
         NotifyStateChanged(); // Fire the OnChange event
     }
 
-    public event Action OnChange;
+    public event Action? OnChange;
 
     public void NotifyStateChanged() => OnChange?.Invoke();
 }

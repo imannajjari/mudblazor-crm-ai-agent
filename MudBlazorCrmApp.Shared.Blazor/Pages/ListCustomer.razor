@@ -50,8 +50,8 @@
         <TemplateColumn Style="width: 50px;" StickyRight="true" Sortable="false" Filterable="false">
             <CellTemplate>
                 <MudStack Row="true">
-                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" Title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
-                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" Title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="@Size.Small" title="@L["ACTION_EDIT"]" OnClick="@(e => OnEdit(context.Item!))" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="@Size.Small" title="@L["ACTION_DELETE"]" OnClick="@(e => OnDelete(context.Item!))" />
                 </MudStack>
             </CellTemplate>
         </TemplateColumn>
@@ -243,9 +243,9 @@
             // Fetch all data from the OData service without any filters or restrictions
             result = await AppService.ListCustomerODataAsync(null, null, null, null, true, "Address,Contact");
 
-            if (result != null && result?.Value != null)
+            if (result?.Value != null)
             {
-                var ar = result?.Value.ToList().Select(x => new
+                var ar = result.Value.ToList().Select(x => new
                 {
                         x.Id,
     x.Name,
@@ -253,7 +253,7 @@
     x.Industry,
     x.Logo,
     x.Notes,
-     AddressCity = x.Address.City,
+     AddressCity = x.Address?.City,
 Contact = string.Join(", ", x.Contact?.Select(x => x.Name?.ToString() ?? string.Empty) ?? []),
 
                 });

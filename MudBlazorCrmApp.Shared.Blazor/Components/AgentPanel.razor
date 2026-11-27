@@ -61,7 +61,7 @@
                                                     @(string.IsNullOrWhiteSpace(chat.Title) ? chat.ChatKey : chat.Title)
                                                 </MudText>
                                                 <span @onclick:stopPropagation="true">
-                                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" OnClick="@(() => Agent.DeleteChatAsync(chat.ChatKey))" Title="@L["ACTION_DELETE"]" />
+                                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" OnClick="@(() => Agent.DeleteChatAsync(chat.ChatKey))" title="@L["ACTION_DELETE"]" />
                                                 </span>
                                             </MudStack>
                                         </MudListItem>

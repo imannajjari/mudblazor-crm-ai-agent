@@ -21,7 +21,7 @@
         @foreach (var item in _sections)
         {
             <MudPaper Elevation="0" Class="pa-4 ma-4 d-flex flex-column mud-background-gray rounded-lg" Style="flex: 1 1 auto; max-width: 25%;">
-                <MudToolBar DisableGutters="true">
+                <MudToolBar Gutters="false">
                     <MudText Typo="Typo.subtitle1"><b>@item.Name</b></MudText>
                     <MudSpacer />
                 </MudToolBar>
@@ -31,25 +31,25 @@
                     <MudPaper Elevation="25" Class="pa-2 rounded-lg">
                         <MudGrid>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.NewTaskName" Label="@L["FLD_NAME"]" Placeholder="@L["FLD_NAME"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.NewTaskName" Label="@L["FLD_NAME"]" Placeholder="@L["FLD_NAME"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.Description" Label="@L["FLD_DESCRIPTION"]" Placeholder="@L["FLD_DESCRIPTION"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.Description" Label="@L["FLD_DESCRIPTION"]" Placeholder="@L["FLD_DESCRIPTION"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.FollowupDate" Label="@L["FLD_FOLLOWUP_DATE"]" Placeholder="@L["FLD_FOLLOWUP_DATE"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.FollowupDate" Label="@L["FLD_FOLLOWUP_DATE"]" Placeholder="@L["FLD_FOLLOWUP_DATE"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.DueDate" Label="@L["FLD_DUE_DATE"]" Placeholder="@L["FLD_DUE_DATE"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.DueDate" Label="@L["FLD_DUE_DATE"]" Placeholder="@L["FLD_DUE_DATE"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.Notes" Label="@L["FLD_NOTES"]" Placeholder="@L["FLD_NOTES"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.Notes" Label="@L["FLD_NOTES"]" Placeholder="@L["FLD_NOTES"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.CreatedDateTime" Label="@L["FLD_CREATED_DT"]" Placeholder="@L["FLD_CREATED_DT"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.CreatedDateTime" Label="@L["FLD_CREATED_DT"]" Placeholder="@L["FLD_CREATED_DT"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
-                                <MudTextField @bind-Value="item.ModifiedDateTime" Label="@L["FLD_MODIFIED_DT"]" Placeholder="@L["FLD_MODIFIED_DT"]" DisableUnderLine="true" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
+                                <MudTextField @bind-Value="item.ModifiedDateTime" Label="@L["FLD_MODIFIED_DT"]" Placeholder="@L["FLD_MODIFIED_DT"]" Underline="false" Margin="Margin.Dense" Class="mx-2 mt-n2"></MudTextField>
                             </MudItem>
                             <MudItem xs="12">
                                 <MudButton OnClick="@(() => AddTask(item))" Size="Size.Small" Color="Color.Primary" FullWidth="true">@L["UI_ADD_TASK"]</MudButton>
@@ -89,7 +89,7 @@
     CustomSnackbar CustomSnackbar = new CustomSnackbar { };
     TodoTask _returnedData = new TodoTask();
     private string? loadError;
-    private TodoTask[] records;
+    private TodoTask[] records = [];
     private MudDropContainer<KanbanTaskItem> _dropContainer = new MudDropContainer<KanbanTaskItem>();
 
     private async Task TaskStatusUpdated(MudItemDropInfo<KanbanTaskItem> info)
@@ -226,18 +226,17 @@
             };
         var dialog = await DialogService.ShowAsync<CustomDialog>("Custom Dialog", dialogParamters, dialogOptions);
         var result = await dialog.Result;
-        if (!result.Canceled)
+        if (result is { Canceled: false })
         {
             var returnedData = await dialog.GetReturnValueAsync<TodoTask>();
-            _returnedData = returnedData;
-            if (string.IsNullOrEmpty(_returnedData.Name))
+            if (returnedData == null || string.IsNullOrEmpty(returnedData.Name))
             {
                 CustomSnackbar.ShowMessage("Task name cannot be empty!", Severity.Error);
                 return;
             }
-            
+            _returnedData = returnedData;
 
-            var updatedItem = new KanbanTaskItem((int)_returnedData.Id, _returnedData.Name, _returnedData.Status, _returnedData.Description, _returnedData.DueDate ?? DateTime.Now.AddDays(7), _returnedData.CreatedDateTime ?? DateTime.Now, _returnedData.ModifiedDateTime ?? DateTime.Now, _returnedData.FollowupDate ?? DateTime.Now.AddDays(3), _returnedData.Notes);
+            var updatedItem = new KanbanTaskItem((int)(_returnedData.Id ?? 0), _returnedData.Name ?? string.Empty, _returnedData.Status ?? string.Empty, _returnedData.Description, _returnedData.DueDate ?? DateTime.Now.AddDays(7), _returnedData.CreatedDateTime ?? DateTime.Now, _returnedData.ModifiedDateTime ?? DateTime.Now, _returnedData.FollowupDate ?? DateTime.Now.AddDays(3), _returnedData.Notes);
             int taskIndex = _tasks.IndexOf(item);
             if (taskIndex != -1)
             {
@@ -321,7 +320,7 @@
 
     private async void LocationChanged(object? sender, LocationChangedEventArgs e)
     {
-        records = null;
+        records = [];
         StateHasChanged();
 
         await LoadDataAsync();
@@ -333,10 +332,9 @@
         try
         {
             var res = await AppService.ListTodoTaskAsync();
-            records = res;
+            records = res ?? [];
 
-            var dataItems = records;
-            _tasks = dataItems.Select(d => new KanbanTaskItem((int)d.Id, d.Name, d.Status, d.Description, d.DueDate ?? DateTime.Now.AddDays(7), d.CreatedDateTime ?? DateTime.Now, d.ModifiedDateTime ?? DateTime.Now, d.FollowupDate ?? DateTime.Now.AddDays(3), d.Notes)).ToList();
+            _tasks = records.Select(d => new KanbanTaskItem((int)(d.Id ?? 0), d.Name ?? string.Empty, d.Status ?? string.Empty, d.Description, d.DueDate ?? DateTime.Now.AddDays(7), d.CreatedDateTime ?? DateTime.Now, d.ModifiedDateTime ?? DateTime.Now, d.FollowupDate ?? DateTime.Now.AddDays(3), d.Notes)).ToList();
             
         }
         catch (Exception ex)

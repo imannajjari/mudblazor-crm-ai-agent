@@ -1,4 +1,4 @@
-@inject AppService AppService
+﻿@inject AppService AppService
 @inject ISnackbar Snackbar
 @inject HttpClient HttpClient
 
@@ -7,11 +7,11 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
     <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept="*/*">
-        <ActivatorContent>
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AttachFile" Size="Size.Small">
+        <CustomContent Context="fileUpload">
+            <MudButton OnClick="@fileUpload.OpenFilePickerAsync" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AttachFile" Size="Size.Small">
                 Attach File
             </MudButton>
-        </ActivatorContent>
+        </CustomContent>
     </MudFileUpload>
     @if (isUploading)
     {
