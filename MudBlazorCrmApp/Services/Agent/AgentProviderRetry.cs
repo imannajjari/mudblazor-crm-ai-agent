@@ -128,8 +128,17 @@ public static class AgentProviderRetry
 
     private static int RetryAfterSeconds(HttpResponseMessage response)
     {
+        var ra = response.Headers.RetryAfter;
+        if (ra == null) return 0;
         // Numeric Retry-After values are parsed into Delta by the HTTP stack.
-        var delta = response.Headers.RetryAfter?.Delta;
-        return delta is { } d && d > TimeSpan.Zero ? (int)Math.Min(d.TotalSeconds, int.MaxValue) : 0;
+        if (ra.Delta is { } d && d > TimeSpan.Zero)
+            return (int)Math.Min(d.TotalSeconds, 30);
+        // Date-form Retry-After ("Retry-After: <HTTP-date>") is also valid for 429/503.
+        if (ra.Date is { } date)
+        {
+            var seconds = (int)(date.UtcDateTime - DateTimeOffset.UtcNow).TotalSeconds;
+            if (seconds > 0) return Math.Min(seconds, 30);
+        }
+        return 0;
     }
 }

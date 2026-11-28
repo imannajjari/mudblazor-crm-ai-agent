@@ -60,36 +60,51 @@ public sealed class AgentService(
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         var stepCt = linked.Token;
 
-        var (systemPrompt, extraNotes) = await BuildInitialContextAsync(parsedMessages, isHowTo, language, totalUsage, options, stepCt);
-        var working = new List<JsonObject>(parsedMessages.Count + extraNotes.Count + 1)
-        {
-            new() { ["role"] = "system", ["content"] = systemPrompt }
-        };
         var prior = new List<string>();
-        foreach (var note in extraNotes)
-        {
-            var noteMsg = new JsonObject { ["role"] = "user", ["content"] = note };
-            working.Add(noteMsg);
-            prior.Add(noteMsg.ToJsonString());
-        }
-        working.AddRange(parsedMessages);
-
         var timings = new List<string>();
-        var guard = AgentServerGuard.FromTranscript(parsedMessages, _serverToolNames);
-        var toolContext = new ServerToolContext(userKey, request.ChatKey ?? string.Empty, language, isAdmin, working);
 
-        for (var hop = 0; hop <= MaxServerHops; hop++)
+        try
         {
-            var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, toolContext, prior, timings, stepCt);
-            if (hopResult == null) continue;
-            if (hopResult.Error != null && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                hopResult.Error = "The agent step took too long and was stopped. Try a narrower task.";
-            return hopResult;
-        }
+            var (systemPrompt, extraNotes) = await BuildInitialContextAsync(parsedMessages, isHowTo, language, totalUsage, options, stepCt);
+            var working = new List<JsonObject>(parsedMessages.Count + extraNotes.Count + 1)
+            {
+                new() { ["role"] = "system", ["content"] = systemPrompt }
+            };
+            foreach (var note in extraNotes)
+            {
+                var noteMsg = new JsonObject { ["role"] = "user", ["content"] = note };
+                working.Add(noteMsg);
+                prior.Add(noteMsg.ToJsonString());
+            }
+            working.AddRange(parsedMessages);
 
-        AccumulateCounter(totalUsage, usageCounter);
-        return BuildError(prior, timings, totalUsage, options, "Server tool hop limit reached.");
+            var guard = AgentServerGuard.FromTranscript(parsedMessages, _serverToolNames);
+            var toolContext = new ServerToolContext(userKey, request.ChatKey ?? string.Empty, language, isAdmin, working);
+
+            for (var hop = 0; hop <= MaxServerHops; hop++)
+            {
+                var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, toolContext, prior, timings, stepCt);
+                if (hopResult == null) continue;
+                if (hopResult.Error != null && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    hopResult.Error = StepDeadlineMessage;
+                return hopResult;
+            }
+
+            AccumulateCounter(totalUsage, usageCounter);
+            return BuildError(prior, timings, totalUsage, options, "Server tool hop limit reached.");
+        }
+        // The step deadline can fire inside a server tool or a help/knowledge side-call, which
+        // re-throw cancellation (it is not an MVC request abort since the caller token is alive);
+        // turn that into the same friendly error instead of an HTML 500, and keep usage counters.
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning("Agent step for {UserKey} hit the {Seconds}s step deadline.", userKey, options.MaxStepDurationSeconds);
+            AccumulateCounter(totalUsage, usageCounter);
+            return BuildError(prior, timings, totalUsage, options, StepDeadlineMessage);
+        }
     }
+
+    private const string StepDeadlineMessage = "The agent step took too long and was stopped. Try a narrower task.";
 
     private async Task<(string SystemPrompt, List<string> ExtraUserNotes)> BuildInitialContextAsync(
         IReadOnlyList<JsonObject> parsedMessages,

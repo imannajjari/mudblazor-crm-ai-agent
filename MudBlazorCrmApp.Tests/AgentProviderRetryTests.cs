@@ -304,6 +304,35 @@ public class AgentProviderRetryTests
     }
 
     [Fact]
+    public async Task OpenAi_429WithRetryAfterHeader_HonoursTheWindow()
+    {
+        var calls = 0;
+        var handler = new FuncHandler((_, ct) =>
+        {
+            calls++;
+            var response = calls == 1
+                ? new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OkChatBody, Encoding.UTF8, "application/json") };
+            if (calls == 1)
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            return response;
+        });
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://example.test/v1/") };
+        // Computed linear backoff would be 10ms; the header says wait 1s and must win.
+        var provider = new OpenAiCompatibleAgentProvider(client,
+            Options.Create(new AgentOptions { ApiKey = "sk-test", ProviderRetryDelayMs = 10 }),
+            NullLogger<OpenAiCompatibleAgentProvider>.Instance);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await provider.CompleteAsync([UserMsg], null, CancellationToken.None);
+        sw.Stop();
+
+        Assert.Null(result.Error);
+        Assert.Equal(2, handler.Calls);
+        Assert.True(sw.ElapsedMilliseconds >= 900, $"Retry-After window not honoured: {sw.ElapsedMilliseconds}ms");
+    }
+
+    [Fact]
     public async Task CancelDuringBackoff_StopsImmediately()
     {
         using var cts = new CancellationTokenSource();
