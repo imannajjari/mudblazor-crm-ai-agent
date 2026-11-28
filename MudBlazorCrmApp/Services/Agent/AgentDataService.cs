@@ -131,18 +131,22 @@ public sealed class AgentDataService(
         if (!string.IsNullOrWhiteSpace(configured) && Uri.TryCreate(configured, UriKind.Absolute, out var cfgUri) && cfgUri.IsLoopback)
             return cfgUri.GetLeftPart(UriPartial.Authority);
 
-        var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
-        var httpBind = addresses?.FirstOrDefault(a => a.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
-        if (httpBind != null)
-        {
-            var normalized = httpBind.Replace("*", "127.0.0.1").Replace("+", "127.0.0.1").Replace("[::]", "127.0.0.1").Replace("0.0.0.0", "127.0.0.1");
-            if (Uri.TryCreate(normalized, UriKind.Absolute, out var boundUri))
-                return $"http://127.0.0.1:{boundUri.Port}";
-        }
+        // Prefer the scheme+port the current request actually arrived on: it already passed the
+        // HTTPS-redirection middleware, so the self-call cannot bounce with a 307. (The old
+        // http-bind preference made every read_data loopback hit UseHttpsRedirection -> 307.)
+        var reqPort = httpCtx.Connection.LocalPort > 0 ? httpCtx.Connection.LocalPort : 5025;
+        var reqScheme = string.Equals(httpCtx.Request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
 
-        var localPort = httpCtx.Connection.LocalPort > 0 ? httpCtx.Connection.LocalPort : 5025;
-        var scheme = string.Equals(httpCtx.Request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
-        return $"{scheme}://127.0.0.1:{localPort}";
+        var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
+        var sameSchemeBind = addresses?.FirstOrDefault(a => a.StartsWith($"{reqScheme}://", StringComparison.OrdinalIgnoreCase));
+        if (sameSchemeBind == null)
+            return $"{reqScheme}://127.0.0.1:{reqPort}";
+
+        var normalized = sameSchemeBind.Replace("*", "127.0.0.1").Replace("+", "127.0.0.1").Replace("[::]", "127.0.0.1").Replace("0.0.0.0", "127.0.0.1");
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var boundUri))
+            return $"{reqScheme}://127.0.0.1:{boundUri.Port}";
+
+        return $"{reqScheme}://127.0.0.1:{reqPort}";
     }
 
     private static string BuildRelativeUri(DataSourceDef def, int top, int skip, string? search, string? status)

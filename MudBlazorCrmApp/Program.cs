@@ -173,7 +173,13 @@ builder.Services.AddHttpClient("Loopback")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
         AllowAutoRedirect = false,
-        UseCookies = false
+        UseCookies = false,
+        // The target is always loopback (AgentDataService.ResolveBaseUri enforces IsLoopback), so the
+        // self-signed Kestrel dev cert cannot come from a public CA. Traffic never leaves the machine,
+        // so accept any cert presented on a loopback URL; without this the agent's https self-call
+        // dies with HttpRequestException (dev cert not in the machine trust store).
+        ServerCertificateCustomValidationCallback = (request, cert, _, _) =>
+            request.RequestUri != null && request.RequestUri.IsLoopback && cert != null
     });
 builder.Services.AddSingleton<IAgentRateLimiter, MemoryCacheRateLimiter>();
 builder.Services.AddSingleton<IAgentHelpCatalog, AgentHelpService>();
