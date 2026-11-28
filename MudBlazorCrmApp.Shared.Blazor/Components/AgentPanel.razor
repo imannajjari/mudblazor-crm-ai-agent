@@ -8,16 +8,20 @@
 @inject NavigationManager Nav
 
 <div data-agent-enabled="@_enabled" data-agent-open="@Agent.IsDrawerOpen">
-@if (_enabled && Agent.IsRunning)
+@if (_enabled && Agent.IsRunning && !Agent.WaitingForPermission && !Agent.WaitingForUserAnswer)
 {
-    <div class="agent-working-aura" data-testid="agent-working-aura"></div>
+    <div class="agent-glow" aria-hidden="true"></div>
 }
 @if (_enabled && Agent.IsDrawerOpen)
 {
     var isEmptyCenter = Agent.Entries.Count == 0 && !Agent.IsRunning && !_showHistory && !Agent.WaitingForPermission && !Agent.WaitingForUserAnswer;
-    <MudPaper Elevation="12"
-              Class="agent-floating-panel"
+    var views = AgentLogViewBuilder.Build(Agent.Entries, L);
+    var workingGroup = Agent.IsRunning && !Agent.WaitingForPermission && !Agent.WaitingForUserAnswer
+        && views.Count > 0 && views[^1] is AgentStepGroupView;
+    var workMode = AgentLogViewBuilder.CurrentMode(Agent.Entries, Agent.WaitingForUserAnswer || Agent.WaitingForPermission);
+    <MudPaper Class="agent-floating-panel agent-panel__body"
               data-agent-panel="true"
+              data-drop-label="@L["AGENT_DROP_FILES"]"
               data-testid="agent-panel">
         <div class="agent-resize-handle agent-resize-n" data-resize-dir="n"></div>
         <div class="agent-resize-handle agent-resize-s" data-resize-dir="s"></div>
@@ -29,236 +33,256 @@
         <div class="agent-resize-handle agent-resize-se" data-resize-dir="se"></div>
         <ErrorBoundary>
             <ChildContent>
-                <MudStack Style="height:100%;" Spacing="0" data-agent-panel="true">
-                    <InputFile id="agent-file-input" data-testid="agent-attach-input" OnChange="OnAttachmentSelected" multiple accept=".txt,.md,.json,.log,.csv,.tsv,.xlsx,.png,.jpg,.jpeg,.webp" style="display:none;" />
-                    <MudToolBar Dense="true" Class="px-3 agent-drag-handle" data-testid="agent-drag-handle">
-                        <div style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--mud-palette-primary) 16%, transparent);" class="me-2">
-                            <MudIcon Icon="@AgentIcons.CopilotSvg" Color="Color.Primary" Size="Size.Small" />
-                        </div>
-                        <MudText Typo="Typo.subtitle2"><b>@L["AGENT_TITLE"]</b></MudText>
-                        <MudSpacer />
-                        <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small" OnClick="ToggleHistory" title="@L["AGENT_HISTORY"]" data-testid="agent-history-btn" />
-                        <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small" OnClick="@(async () => { _showHistory = false; await Agent.NewChatAsync(); })" title="@L["AGENT_NEW_CHAT"]" data-testid="agent-new-chat" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="ClosePanel" title="@L["AGENT_CLOSE"]" data-testid="agent-close-btn" />
-                    </MudToolBar>
-
-                    @if (_showHistory)
-                    {
-                        <div style="flex:1;overflow-y:auto;padding:12px;" data-testid="agent-history-list">
-                            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["AGENT_HISTORY"]</MudText>
-                            @if (Agent.SavedChats.Count == 0)
+                <div class="agent-panel__header" data-testid="agent-drag-handle" title="@L["AGENT_PANEL_HEADER_HINT"]">
+                    <span class="agent-panel__title">@(_showHistory ? L["AGENT_CHATS"] : L["AGENT_TITLE"])</span>
+                    <div class="agent-panel__header-buttons">
+                        <button type="button" class="agent-button" disabled="@Agent.IsRunning"
+                                @onclick="NewChat" title="@L["AGENT_NEW_CHAT"]" data-testid="agent-new-chat">
+                            @L["AGENT_NEW_CHAT"]
+                        </button>
+                        <button type="button" class="agent-button agent-button--outline"
+                                @onclick="ToggleHistory" data-testid="agent-history-btn">
+                            @if (_showHistory)
                             {
-                                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["AGENT_NO_HISTORY"]</MudText>
+                                @L["AGENT_BACK"]
                             }
                             else
                             {
-                                <MudList T="string" Dense="true">
-                                    @foreach (var chat in Agent.SavedChats)
-                                    {
-                                        <MudListItem OnClick="@(() => SelectChat(chat.ChatKey))">
-                                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                                <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;">
-                                                    @(string.IsNullOrWhiteSpace(chat.Title) ? chat.ChatKey : chat.Title)
-                                                </MudText>
-                                                <span @onclick:stopPropagation="true">
-                                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" OnClick="@(() => Agent.DeleteChatAsync(chat.ChatKey))" title="@L["ACTION_DELETE"]" />
-                                                </span>
-                                            </MudStack>
-                                        </MudListItem>
-                                    }
-                                </MudList>
+                                @($"{L["AGENT_CHATS"]} ({Agent.SavedChats.Count})")
                             }
-                        </div>
-                    }
-                    else if (isEmptyCenter)
-                    {
-                        <div style="flex:1;overflow-y:auto;padding:24px;" class="d-flex flex-column justify-center align-center gap-3">
-                            <div class="agent-hero-badge">
-                                <MudIcon Icon="@AgentIcons.CopilotSvg" Size="Size.Large" Style="color:#fff;" />
-                            </div>
-                            <MudText Typo="Typo.h6" Align="Align.Center"><b>@L["AGENT_TITLE"]</b></MudText>
-                            <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Style="max-width:340px;">
-                                @L["AGENT_EMPTY_STATE"]
-                            </MudText>
-                            <div class="d-flex flex-wrap justify-center gap-1 my-1">
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync(L["AGENT_CHIP_CUSTOMERS_PROMPT"]))">@L["AGENT_CHIP_CUSTOMERS_LABEL"]</MudChip>
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync(L["AGENT_CHIP_SALES_PROMPT"]))">@L["AGENT_CHIP_SALES_LABEL"]</MudChip>
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Agent.SendTaskAsync(L["AGENT_CHIP_GUIDE_PROMPT"]))">@L["AGENT_CHIP_GUIDE_LABEL"]</MudChip>
-                            </div>
-                            <div class="agent-composer" style="width:100%;" title="@L["AGENT_DROP_FILES"]">
-                                @if (Agent.AttachedFiles.Count > 0)
-                                {
-                                    <div class="agent-chips">
-                                        @foreach (var f in Agent.AttachedFiles)
-                                        {
-                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)" data-testid="agent-attach-chip">
-                                                <span class="agent-chip__name">@f.FileName</span>
-                                                <button type="button" class="agent-chip__remove" @onclick="@(() => Agent.RemoveAttachmentAsync(f.Id))">×</button>
-                                            </span>
-                                        }
-                                    </div>
-                                }
-                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                                    <MudTextField @bind-Value="_taskInput"
-                                                  Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
-                                                  Variant="Variant.Text"
-                                                  Margin="Margin.Dense"
-                                                  Underline="false"
-                                                  Disabled="@Agent.IsRunning"
-                                                  Immediate="true"
-                                                  OnKeyDown="OnTaskKeyDown"
-                                                  data-testid="agent-input"
-                                                  Style="flex:1;" />
-                                    <label for="agent-file-input" title="@L["AGENT_ATTACH_HINT"]" style="cursor:pointer;display:inline-flex;align-items:center;padding:4px;opacity:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "0.5" : "1");pointer-events:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "none" : "auto");">
-                                        <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
-                                    </label>
-                                    <MudIconButton Icon="@(_isListening ? Icons.Material.Filled.MicOff : Icons.Material.Filled.Mic)" Color="@(_isListening ? Color.Error : Color.Default)" Size="Size.Small" OnClick="ToggleVoiceInput" Disabled="@Agent.IsRunning" title="@L["AGENT_VOICE_HINT"]" data-testid="agent-voice-btn" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-run" Style="border-radius:10px;" />
-                                </MudStack>
-                                <div class="mt-2 pt-2 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
-                                    <select class="agent-mode-select"
-                                            value="@Agent.Mode"
-                                            @onchange="OnModeChanged"
-                                            disabled="@Agent.IsRunning"
-                                            style="max-width:190px;font-size:12px;background:transparent;color:inherit;border:1px solid var(--mud-palette-lines-default);border-radius:6px;padding:3px 8px;"
-                                            data-testid="agent-mode">
-                                        <option value="@AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</option>
-                                        <option value="@AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</option>
-                                        <option value="@AgentMode.Auto">@L["AGENT_MODE_AUTO"]</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    }
-                    else
-                    {
-                    <div style="flex:1;overflow-y:auto;padding:12px;" class="d-flex flex-column gap-2">
-                        @if (Agent.Entries.Count == 0)
+                        </button>
+                        <button type="button" class="agent-button agent-button--outline"
+                                @onclick="ClosePanel" title="@L["AGENT_CLOSE"]" data-testid="agent-close-btn">
+                            @L["AGENT_CLOSE"]
+                        </button>
+                    </div>
+                </div>
+
+                @if (_showHistory)
+                {
+                    <div class="agent-panel__log" data-testid="agent-history-list">
+                        @if (Agent.SavedChats.Count == 0)
                         {
-                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-                                @L["AGENT_EMPTY_STATE"]
-                            </MudAlert>
+                            <div class="agent-panel__empty">@L["AGENT_NO_HISTORY"]</div>
                         }
                         else
                         {
-                            @foreach (var entry in Agent.Entries)
+                            @foreach (var chat in Agent.SavedChats)
                             {
-                                @if (entry.Kind == "user")
-                                {
-                                    <MudPaper Class="pa-2 px-3 align-self-end agent-bubble-user" Elevation="0">
-                                        <MudText Typo="Typo.body2" Style="color:#fff;">@entry.Text</MudText>
-                                    </MudPaper>
-                                }
-                                else if (entry.Kind == "assistant")
-                                {
-                                    var parsed = AgentWidgetParser.Parse(entry.Text);
-                                    <MudPaper Class="pa-3 align-self-start agent-bubble-assistant" Elevation="0" Style="word-break:break-word;position:relative;" data-testid="agent-result">
-                                        <div class="d-flex justify-end mb-1">
-                                            <MudIconButton Icon="@(_copiedEntry == entry ? Icons.Material.Filled.Check : Icons.Material.Filled.ContentCopy)"
-                                                           Size="Size.Small"
-                                                           OnClick="@(() => CopyEntry(entry))"
-                                                           title="@L[_copiedEntry == entry ? "AGENT_COPIED" : "AGENT_COPY"]"
-                                                           data-testid="agent-copy-btn" />
-                                        </div>
-                                        @if (parsed.Kpis.Count > 0)
-                                        {
-                                            <div class="d-flex flex-wrap gap-2 mb-2">
-                                                @foreach (var kpi in parsed.Kpis)
-                                                {
-                                                    <div class="agent-widget-kpi">
-                                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@kpi.Title</MudText>
-                                                        <MudText Typo="Typo.subtitle2"><b>@kpi.Value</b></MudText>
-                                                        @if (!string.IsNullOrWhiteSpace(kpi.Trend))
-                                                        {
-                                                            <MudText Typo="Typo.caption" Color="Color.Primary">@kpi.Trend</MudText>
-                                                        }
-                                                    </div>
-                                                }
-                                            </div>
-                                        }
-                                        @if (parsed.Charts.Count > 0)
-                                        {
-                                            <div class="d-flex flex-column gap-2 mb-2" data-testid="agent-widget-charts">
-                                                @foreach (var chart in parsed.Charts)
-                                                {
-                                                    <div class="pa-2 rounded" style="border:1px solid var(--mud-palette-divider);background:var(--mud-palette-background);">
-                                                        <MudText Typo="Typo.caption" Class="mb-1"><b>@chart.Title</b></MudText>
-                                                        @foreach (var bar in chart.Bars)
-                                                        {
-                                                            <div class="mb-1">
-                                                                <div class="d-flex justify-space-between">
-                                                                    <MudText Typo="Typo.caption">@bar.Label</MudText>
-                                                                    <MudText Typo="Typo.caption"><b>@bar.Value.ToString("0.##")</b></MudText>
-                                                                </div>
-                                                                <div style="height:6px;border-radius:3px;background:var(--mud-palette-divider);overflow:hidden;">
-                                                                    <div style="@($"height:100%;width:{bar.PercentWidth.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%;background:var(--mud-palette-primary);")"></div>
-                                                                </div>
-                                                            </div>
-                                                        }
-                                                    </div>
-                                                }
-                                            </div>
-                                        }
-                                        @if (!string.IsNullOrWhiteSpace(parsed.MarkdownText))
-                                        {
-                                            <div class="mud-typography mud-typography-body2" style="line-height:1.65;">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(parsed.MarkdownText))</div>
-                                        }
-                                        @if (parsed.Actions.Count > 0)
-                                        {
-                                            <div class="d-flex flex-wrap gap-1 mt-2">
-                                                @foreach (var act in parsed.Actions)
-                                                {
-                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Nav.NavigateTo(act.Route))">@act.Label</MudButton>
-                                                }
-                                            </div>
-                                        }
-                                    </MudPaper>
-                                }
-                                else if (entry.Kind is "help" or "note")
-                                {
-                                    <details class="agent-help-note" data-testid="agent-help-note">
-                                        <summary>@L["AGENT_HELP_NOTE_TITLE"]</summary>
-                                        <div class="mt-1 mud-typography mud-typography-caption" style="white-space:pre-wrap;">@entry.Text</div>
-                                    </details>
-                                }
-                                else if (entry.Kind == "tool")
-                                {
-                                    var displayTool = entry.Text.StartsWith("finish(", StringComparison.Ordinal) ? "finish" : entry.Text;
-                                    <div class="agent-tool-pill align-self-end" title="@entry.Text" data-testid="agent-step" data-blocked="@(entry.IsBlocked ? "true" : null)">
-                                        <span>⚙</span>
-                                        <span style="overflow:hidden;text-overflow:ellipsis;">@displayTool</span>
-                                    </div>
-                                }
-                                else if (entry.Kind == "question")
-                                {
-                                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
-                                        @entry.Text
-                                    </MudAlert>
-                                }
-                                else if (entry.Kind == "error")
-                                {
-                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" data-testid="agent-error">
-                                        @L["AGENT_ERROR_PREFIX"]@entry.Text
-                                    </MudAlert>
-                                }
-                                else
-                                {
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@entry.Text</MudText>
-                                }
+                                var stateClass = (chat.ChatKey == Agent.CurrentChatKey ? "agent-session--current" : "") + (Agent.IsRunning ? " agent-session--busy" : "");
+                                <div class="agent-session @stateClass"
+                                     title="@L["AGENT_OPEN_THIS_CHAT"]" @onclick="@(() => SelectChat(chat.ChatKey))">
+                                    <span class="agent-session__title">@(string.IsNullOrWhiteSpace(chat.Title) ? chat.ChatKey : chat.Title)</span>
+                                    <span class="agent-session__when">@chat.UpdatedDate.ToString("yyyy/MM/dd HH:mm")</span>
+                                    <span @onclick:stopPropagation="true">
+                                        <button type="button" class="agent-button agent-button--outline"
+                                                @onclick="@(() => Agent.DeleteChatAsync(chat.ChatKey))" title="@L["ACTION_DELETE"]">
+                                            @L["ACTION_DELETE"]
+                                        </button>
+                                    </span>
+                                </div>
                             }
+                        }
+                    </div>
+                }
+                else if (isEmptyCenter)
+                {
+                    <div class="agent-panel__welcome">
+                        <div class="agent-panel__welcome-title">@_greeting</div>
+                        <AgentComposer Value="@_taskInput" Centered="true"
+                                       IsRunning="Agent.IsRunning" IsUploading="Agent.IsUploadingAttachment"
+                                       IsListening="_isListening" AttachedFiles="Agent.AttachedFiles"
+                                       OnInput="OnInputTask"
+                                       OnKeyDown="OnTaskKeyDown"
+                                       OnFilesSelected="OnAttachmentSelected"
+                                       RemoveAttachment="@(id => Agent.RemoveAttachmentAsync(id))"
+                                       Send="SendTask" Stop="Agent.Stop" ToggleVoice="ToggleVoiceWrapper"
+                                       OnModeChanged="OnModeChanged" />
+                        <div class="agent-panel__row agent-panel__row--options">
+                            <button type="button" class="agent-button agent-button--option"
+                                    @onclick="@(() => Agent.SendTaskAsync(L["AGENT_CHIP_CUSTOMERS_PROMPT"]))">@L["AGENT_CHIP_CUSTOMERS_LABEL"]</button>
+                            <button type="button" class="agent-button agent-button--option"
+                                    @onclick="@(() => Agent.SendTaskAsync(L["AGENT_CHIP_SALES_PROMPT"]))">@L["AGENT_CHIP_SALES_LABEL"]</button>
+                            <button type="button" class="agent-button agent-button--option"
+                                    @onclick="@(() => Agent.SendTaskAsync(L["AGENT_CHIP_GUIDE_PROMPT"]))">@L["AGENT_CHIP_GUIDE_LABEL"]</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="agent-panel__log">
+                        @if (views.Count == 0)
+                        {
+                            <div class="agent-panel__empty">@L["AGENT_EMPTY_STATE"]</div>
+                        }
+                        @foreach (var view in views)
+                        {
+                            if (view is AgentTaskView task)
+                            {
+                                <div class="agent-task @(task.IsFirst ? "agent-task--first" : "")">@($"{L["AGENT_TASK"]}: {task.Entry.Text}")</div>
+                            }
+                            else if (view is AgentLineView line && line.Tone == "user")
+                            {
+                                <div class="agent-line agent-tone--user">@($"{L["AGENT_YOU"]}: {line.Entry.Text}")</div>
+                            }
+                            else if (view is AgentLineView infoLine)
+                            {
+                                <div class="agent-line agent-tone--@infoLine.Tone">@infoLine.Entry.Text</div>
+                            }
+                            else if (view is AgentCardView card && card.CardType == "done")
+                            {
+                                var parsed = AgentWidgetParser.Parse(card.Entry.Text);
+                                <div class="agent-card agent-card--done" data-testid="agent-result">
+                                    <div class="agent-card__header">
+                                        <div class="agent-card__title">@L["AGENT_RESULT"]</div>
+                                        <button type="button" class="agent-copy @(_copiedEntry == card.Entry ? "agent-copy--copied" : "")"
+                                                @onclick="@(() => CopyEntry(card.Entry))"
+                                                title="@L[_copiedEntry == card.Entry ? "AGENT_COPIED" : "AGENT_COPY"]"
+                                                data-testid="agent-copy-btn">
+                                            @if (_copiedEntry == card.Entry)
+                                            {
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                                            }
+                                            else
+                                            {
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" /><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" stroke="currentColor" stroke-width="1.4" /></svg>
+                                            }
+                                        </button>
+                                    </div>
+                                    @if (parsed.Kpis.Count > 0)
+                                    {
+                                        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                                            @foreach (var kpi in parsed.Kpis)
+                                            {
+                                                <div class="agent-widget-kpi">
+                                                    <div style="font-size:11px;color:var(--agent-muted);">@kpi.Title</div>
+                                                    <div style="font-weight:600;">@kpi.Value</div>
+                                                    @if (!string.IsNullOrWhiteSpace(kpi.Trend))
+                                                    {
+                                                        <div style="font-size:11px;color:var(--agent-done);">@kpi.Trend</div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    @if (parsed.Charts.Count > 0)
+                                    {
+                                        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;" data-testid="agent-widget-charts">
+                                            @foreach (var chart in parsed.Charts)
+                                            {
+                                                <div class="agent-widget-chart">
+                                                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;">@chart.Title</div>
+                                                    @foreach (var bar in chart.Bars)
+                                                    {
+                                                        <div style="margin-bottom:6px;">
+                                                            <div style="display:flex;justify-content:space-between;font-size:11px;">
+                                                                <span>@bar.Label</span><span style="font-weight:600;">@bar.Value.ToString("0.##")</span>
+                                                            </div>
+                                                            <div class="agent-widget-chart__track">
+                                                                <div class="agent-widget-chart__fill" style="@($"width:{bar.PercentWidth.ToString("0.#", CultureInfo.InvariantCulture)}%;")"></div>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(parsed.MarkdownText))
+                                    {
+                                        <div class="agent-md">@((MarkupString)SafeMarkdownFormatter.ToSafeHtml(parsed.MarkdownText))</div>
+                                    }
+                                    @if (parsed.Actions.Count > 0)
+                                    {
+                                        <div class="agent-panel__row agent-panel__row--options" style="margin-top:8px;">
+                                            @foreach (var act in parsed.Actions)
+                                            {
+                                                <button type="button" class="agent-button agent-button--option"
+                                                        @onclick="@(() => Nav.NavigateTo(act.Route))">@act.Label</button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            else if (view is AgentCardView askCard && askCard.CardType == "ask")
+                            {
+                                <div class="agent-card agent-card--ask agent-tone--ask">@askCard.Entry.Text</div>
+                            }
+                            else if (view is AgentCardView errorCard)
+                            {
+                                <div class="agent-card agent-card--error agent-tone--error" data-testid="agent-error">@L["AGENT_ERROR_PREFIX"]@errorCard.Entry.Text</div>
+                            }
+                            else if (view is AgentNotesView note)
+                            {
+                                <details class="agent-notes" data-testid="agent-help-note">
+                                    <summary>@L["AGENT_HELP_NOTE_TITLE"]</summary>
+                                    <div class="agent-pre-line" style="margin-top:4px;">@note.Entry.Text</div>
+                                </details>
+                            }
+                            else if (view is AgentStepGroupView group)
+                            {
+                                var open = _openStepGroups.Contains(group.Id);
+                                var isWorkingGroup = workingGroup && ReferenceEquals(group, views[^1]);
+                                <div class="agent-steps">
+                                    <div class="agent-steps__header"
+                                         role="@(isWorkingGroup ? "status" : null)"
+                                         aria-live="@(isWorkingGroup ? "polite" : null)">
+                                        <button type="button" class="agent-steps__toggle @(open ? "agent-steps__toggle--open" : "")"
+                                                aria-expanded="@(open ? "true" : "false")"
+                                                title="@(open ? L["AGENT_STEPS_HIDE"] : L["AGENT_STEPS_SHOW"])"
+                                                @onclick="@(() => ToggleStepGroup(group.Id))">
+                                            <span class="agent-steps__arrow" aria-hidden="true"></span>
+                                            @if (isWorkingGroup)
+                                            {
+                                                <span data-testid="agent-working" style="display:contents;">
+                                                    <AgentWorkingContent Mode="workMode" />
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span>@StepsSummary(group.StepCount)</span>
+                                            }
+                                            @if (group.HasWarning)
+                                            {
+                                                <span class="agent-steps__warn" title="@L["AGENT_STEPS_DID_NOT_WORK"]">(!)</span>
+                                            }
+                                        </button>
+                                    </div>
+                                    @if (open)
+                                    {
+                                        <div class="agent-steps__body">
+                                            @foreach (var step in group.Steps)
+                                            {
+                                                <details class="agent-step">
+                                                    <summary class="agent-step__summary agent-tone--@(step.Entry.IsBlocked ? "warn" : "tool")"
+                                                             title="@step.Entry.Text" data-testid="agent-step"
+                                                             data-blocked="@(step.Entry.IsBlocked ? "true" : null)">
+                                                        @step.Title
+                                                    </summary>
+                                                    <div class="agent-pre-line agent-tone--llm" style="padding-inline-start:8px;">@AgentLogViewBuilder.DecodeToolText(step.Entry.Text)</div>
+                                                </details>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        }
+
+                        @if (Agent.IsRunning && !workingGroup)
+                        {
+                            <AgentWorkingMark IsActive="true" Mode="workMode" TestId="agent-working" />
                         }
 
                         @if (Agent.LastLedger.Count > 0 || Agent.OpenedLedger.Count > 0)
                         {
-                            <details class="agent-help-note" data-testid="agent-ledger">
+                            <details class="agent-notes" data-testid="agent-ledger">
                                 <summary>@L["AGENT_ACTIONS_DONE"] (@(Agent.LastLedger.Count + Agent.OpenedLedger.Count))</summary>
-                                <ul data-testid="agent-ledger-wrote" class="ps-4 my-1">
+                                <ul data-testid="agent-ledger-wrote" style="margin:4px 0;padding-inline-start:22px;">
                                     @foreach (var item in Agent.LastLedger)
                                     {
                                         <li>@item</li>
                                     }
                                 </ul>
-                                <ul data-testid="agent-ledger-opened" class="ps-4 my-1">
+                                <ul data-testid="agent-ledger-opened" style="margin:4px 0;padding-inline-start:22px;">
                                     @foreach (var item in Agent.OpenedLedger)
                                     {
                                         <li>@item</li>
@@ -267,51 +291,68 @@
                             </details>
                         }
 
-                        @if (Agent.IsRunning && !Agent.WaitingForUserAnswer && !Agent.WaitingForPermission)
+                        @if (Agent.TotalCalls > 0)
                         {
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-1 px-1" data-testid="agent-working">
-                                <span class="agent-working__dots"><i></i><i></i><i></i></span>
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AGENT_THINKING"]</MudText>
-                            </MudStack>
+                            <div class="agent-stats" data-testid="agent-stats">
+                                @string.Format(L["AGENT_STATS_FORMAT"], Agent.TotalCalls, Agent.TotalInputTokens, Agent.TotalOutputTokens)
+                                @if (Agent.ShowCost)
+                                {
+                                    @string.Format(L["AGENT_STATS_COST_FORMAT"], Agent.TotalCost)
+                                }
+                            </div>
                         }
+
+                        <div class="agent-panel__copy-row">
+                            <button type="button" class="agent-copy agent-copy--labelled @(_copiedChat ? "agent-copy--copied" : "")"
+                                    @onclick="CopyChat" data-testid="agent-copy-chat-btn">
+                                @if (_copiedChat)
+                                {
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                                }
+                                else
+                                {
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" /><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" stroke="currentColor" stroke-width="1.4" /></svg>
+                                }
+                                <span>@(_copiedChat ? L["AGENT_COPIED"] : L["AGENT_COPY_CHAT"])</span>
+                            </button>
+                        </div>
                     </div>
+                }
 
-                    @if (Agent.TotalCalls > 0)
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="px-3 py-1 border-t" data-testid="agent-stats">
-                            @string.Format(L["AGENT_STATS_FORMAT"], Agent.TotalCalls, Agent.TotalInputTokens, Agent.TotalOutputTokens)
-                            @if (Agent.ShowCost)
-                            {
-                                @string.Format(L["AGENT_STATS_COST_FORMAT"], Agent.TotalCost)
-                            }
-                        </MudText>
-                    }
-                    }
-
-                    @if (!isEmptyCenter)
-                    {
-                    <div class="pa-3 border-t">
+                @if (!isEmptyCenter)
+                {
+                    <div class="agent-panel__footer">
                         @if (Agent.WaitingForPermission)
                         {
                             <div data-testid="agent-question">
-                                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-2" data-testid="agent-question-text">
+                                <div class="agent-card agent-card--ask" data-testid="agent-question-text">
                                     @string.Format(L["AGENT_PERM_PROMPT"], Agent.PendingPermissionLabel, Agent.PendingPermissionRisk)
-                                </MudAlert>
-                                <MudStack Row="true" Spacing="1">
-                                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" data-testid="agent-question-option" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowOnce))">
+                                </div>
+                                <div class="agent-panel__row agent-panel__row--options">
+                                    <button type="button" class="agent-button agent-button--option"
+                                            data-testid="agent-question-option"
+                                            @onclick="@(() => Agent.ResolvePermission(PermissionDecision.AllowOnce))">
                                         @L["AGENT_PERM_ALLOW_ONCE"]
-                                    </MudButton>
+                                    </button>
                                     @if (Agent.PendingPermissionRisk is "light" or "export")
                                     {
-                                        <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" data-testid="agent-question-option" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.AllowAlways))">
+                                        <button type="button" class="agent-button agent-button--outline agent-button--option"
+                                                data-testid="agent-question-option"
+                                                @onclick="@(() => Agent.ResolvePermission(PermissionDecision.AllowAlways))">
                                             @L["AGENT_PERM_ALLOW_ALWAYS"]
-                                        </MudButton>
+                                        </button>
                                     }
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" data-testid="agent-question-option" OnClick="@(() => Agent.ResolvePermission(PermissionDecision.Deny))">
+                                    <button type="button" class="agent-button agent-button--outline agent-button--option"
+                                            data-testid="agent-question-option"
+                                            @onclick="@(() => Agent.ResolvePermission(PermissionDecision.Deny))">
                                         @L["AGENT_PERM_DENY"]
-                                    </MudButton>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop" Style="border-radius:10px;" />
-                                </MudStack>
+                                    </button>
+                                    <button type="button" class="agent-button agent-button--outline"
+                                            @onclick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop">
+                                        @L["AGENT_STOP"]
+                                    </button>
+                                </div>
+                                <AgentModePicker Value="Agent.Mode" OnValueChanged="OnModeChanged" />
                             </div>
                         }
                         else if (Agent.WaitingForUserAnswer)
@@ -319,87 +360,47 @@
                             <div data-testid="agent-question">
                                 @if (!string.IsNullOrWhiteSpace(Agent.PendingQuestion))
                                 {
-                                    <MudText Typo="Typo.caption" Class="mb-1 d-block" data-testid="agent-question-text">@Agent.PendingQuestion</MudText>
+                                    <div class="agent-pre-line" data-testid="agent-question-text" style="margin-bottom:6px;">@Agent.PendingQuestion</div>
                                 }
                                 @if (Agent.PendingQuestionOptions is { Length: > 0 } opts)
                                 {
-                                    <div class="d-flex flex-wrap gap-1 mb-2">
+                                    <div class="agent-panel__row agent-panel__row--options">
                                         @foreach (var opt in opts)
                                         {
-                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => PickUserOption(opt))" data-testid="agent-question-option">@opt</MudButton>
+                                            <button type="button" class="agent-button agent-button--option"
+                                                    @onclick="@(() => PickUserOption(opt))" data-testid="agent-question-option">@opt</button>
                                         }
                                     </div>
                                 }
-                                <MudStack Row="true" Spacing="1">
-                                    <MudTextField @bind-Value="_answerInput"
-                                                  Placeholder="@(Agent.PendingQuestion ?? L["AGENT_INPUT_PLACEHOLDER"])"
-                                                  Variant="Variant.Outlined"
-                                                  Margin="Margin.Dense"
-                                                  Immediate="true"
-                                                  OnKeyDown="OnAnswerKeyDown"
-                                                  data-testid="agent-question-other-input"
-                                                  Style="flex:1;" />
-                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" data-testid="agent-question-other-send" OnClick="SubmitAnswer">@L["AGENT_SEND"]</MudButton>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop" Style="border-radius:10px;" />
-                                </MudStack>
+                                <div class="agent-panel__row">
+                                    <input class="agent-panel__input" style="flex:1;"
+                                           placeholder="@((Agent.PendingQuestionOptions is { Length: > 0 }) ? L["AGENT_OTHER_ANSWER"] : L["AGENT_YOUR_ANSWER"])"
+                                           @bind="_answerInput" @bind:event="oninput" @onkeydown="OnAnswerKeyDown"
+                                           data-testid="agent-question-other-input" />
+                                    <button type="button" class="agent-button" @onclick="SubmitAnswer"
+                                            data-testid="agent-question-other-send">@L["AGENT_SEND"]</button>
+                                    <button type="button" class="agent-button agent-button--outline"
+                                            @onclick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop">
+                                        @L["AGENT_STOP"]
+                                    </button>
+                                </div>
+                                <AgentModePicker Value="Agent.Mode" OnValueChanged="OnModeChanged" />
                             </div>
                         }
                         else
                         {
-                            <div class="agent-composer" title="@L["AGENT_DROP_FILES"]">
-                                @if (Agent.AttachedFiles.Count > 0)
-                                {
-                                    <div class="agent-chips">
-                                        @foreach (var f in Agent.AttachedFiles)
-                                        {
-                                            <span class="agent-chip @(f.Error != null ? "agent-chip--failed" : "")" title="@(f.Error ?? f.Kind)" data-testid="agent-attach-chip">
-                                                <span class="agent-chip__name">@f.FileName</span>
-                                                <button type="button" class="agent-chip__remove" @onclick="@(() => Agent.RemoveAttachmentAsync(f.Id))">×</button>
-                                            </span>
-                                        }
-                                    </div>
-                                }
-                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                                    <MudTextField @bind-Value="_taskInput"
-                                                  Placeholder="@L["AGENT_INPUT_PLACEHOLDER"]"
-                                                  Variant="Variant.Text"
-                                                  Margin="Margin.Dense"
-                                                  Underline="false"
-                                                  Disabled="@Agent.IsRunning"
-                                                  Immediate="true"
-                                                  OnKeyDown="OnTaskKeyDown"
-                                                  data-testid="agent-input"
-                                                  Style="flex:1;" />
-                                    @if (Agent.IsRunning)
-                                    {
-                                        <MudIconButton Icon="@Icons.Material.Filled.Stop" Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="@(() => Agent.Stop())" title="@L["AGENT_STOP"]" data-testid="agent-stop" Style="border-radius:10px;" />
-                                    }
-                                    else
-                                    {
-                                        <label for="agent-file-input" title="@L["AGENT_ATTACH_HINT"]" style="cursor:pointer;display:inline-flex;align-items:center;padding:4px;opacity:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "0.5" : "1");pointer-events:@((Agent.IsRunning || Agent.IsUploadingAttachment) ? "none" : "auto");">
-                                            <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
-                                        </label>
-                                        <MudIconButton Icon="@(_isListening ? Icons.Material.Filled.MicOff : Icons.Material.Filled.Mic)" Color="@(_isListening ? Color.Error : Color.Default)" Size="Size.Small" OnClick="ToggleVoiceInput" Disabled="@Agent.IsRunning" title="@L["AGENT_VOICE_HINT"]" data-testid="agent-voice-btn" />
-                                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SendTask" Disabled="@(string.IsNullOrWhiteSpace(_taskInput) || Agent.IsUploadingAttachment)" title="@L["AGENT_SEND"]" data-testid="agent-run" Style="border-radius:10px;" />
-                                    }
-                                </MudStack>
-                                <div class="mt-1 pt-1 d-flex justify-start" style="border-top:1px solid var(--mud-palette-lines-default);">
-                                    <select class="agent-mode-select"
-                                            value="@Agent.Mode"
-                                            @onchange="OnModeChanged"
-                                            disabled="@Agent.IsRunning"
-                                            style="max-width:190px;font-size:12px;background:transparent;color:inherit;border:1px solid var(--mud-palette-lines-default);border-radius:6px;padding:3px 8px;"
-                                            data-testid="agent-mode">
-                                        <option value="@AgentMode.Manual">@L["AGENT_MODE_MANUAL"]</option>
-                                        <option value="@AgentMode.SemiAuto">@L["AGENT_MODE_SEMIAUTO"]</option>
-                                        <option value="@AgentMode.Auto">@L["AGENT_MODE_AUTO"]</option>
-                                    </select>
-                                </div>
-                            </div>
+                            <AgentComposer Value="@_taskInput" Centered="false"
+                                           IsRunning="Agent.IsRunning" IsUploading="Agent.IsUploadingAttachment"
+                                           IsListening="_isListening" AttachedFiles="Agent.AttachedFiles"
+                                           OnInput="OnInputTask"
+                                           OnKeyDown="OnTaskKeyDown"
+                                           OnFilesSelected="OnAttachmentSelected"
+                                           RemoveAttachment="@(id => Agent.RemoveAttachmentAsync(id))"
+                                           Send="SendTask" Stop="Agent.Stop" ToggleVoice="ToggleVoiceWrapper"
+                                           OnModeChanged="OnModeChanged" />
                         }
                     </div>
-                    }
-                </MudStack>
+                }
             </ChildContent>
             <ErrorContent Context="ex">
                 <MudAlert Severity="Severity.Error" Class="ma-3">
@@ -417,13 +418,63 @@
     private bool _isListening;
     private string _taskInput = string.Empty;
     private string _answerInput = string.Empty;
+    private string _greeting = string.Empty;
+    private int _lastGreetingIdx = -1;
     private const int MaxFilesPerPick = 5;
     private DotNetObjectReference<AgentPanel>? _dotNetRef;
     private AgentClientService.AgentChatEntry? _copiedEntry;
+    private bool _copiedChat;
     private bool _hydratedFromStorage;
     private bool _suppressSave;
     private bool _disposed;
     private CancellationTokenSource? _stateSaveCts;
+    private readonly HashSet<string> _openStepGroups = [];
+
+    private string PickGreeting()
+    {
+        var idx = Random.Shared.Next(1, 11);
+        if (idx == _lastGreetingIdx) idx = idx % 10 + 1;
+        _lastGreetingIdx = idx;
+        return L[$"AGENT_GREETING_{idx}"];
+    }
+
+    private string StepsSummary(int count)
+    {
+        var key = count == 1 ? "AGENT_STEPS_ONE" : "AGENT_STEPS_MANY";
+        try { return string.Format(L[key], count); } catch (FormatException) { return count.ToString(); }
+    }
+
+    private void ToggleStepGroup(string id)
+    {
+        if (!_openStepGroups.Remove(id)) _openStepGroups.Add(id);
+    }
+
+    private void OnInputTask(string value) => _taskInput = value;
+
+    private async Task NewChat()
+    {
+        if (Agent.IsRunning) return;
+        _showHistory = false;
+        _greeting = PickGreeting();
+        _openStepGroups.Clear();
+        await Agent.NewChatAsync();
+    }
+
+    private async Task CopyChat()
+    {
+        try
+        {
+            var ok = await JS.InvokeAsync<bool>("crmAgentDriver.copyText", AgentLogViewBuilder.ChatText(Agent.Entries, L));
+            if (!ok || _disposed) return;
+            _copiedChat = true;
+            StateHasChanged();
+            await Task.Delay(1200);
+            if (!_disposed) { _copiedChat = false; StateHasChanged(); }
+        }
+        catch (JSException) { /* clipboard unavailable */ }
+    }
+
+    private Task ToggleVoiceWrapper() => ToggleVoiceInput();
 
     private async Task OnAttachmentSelected(InputFileChangeEventArgs e)
     {
@@ -532,6 +583,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _greeting = PickGreeting();
         Agent.OnStateChanged += HandleStateChanged;
         Agent.OnLogoutCleared += HandleLogoutCleared;
         _enabled = await Agent.IsEnabledAsync();
@@ -597,6 +649,7 @@
         _answerInput = string.Empty;
         _showHistory = false;
         _copiedEntry = null;
+        _greeting = PickGreeting();
     }
 
     private void SchedulePanelStateSave()
@@ -675,10 +728,10 @@
         Agent.IsDrawerOpen = false;
     }
 
-    private void OnModeChanged(ChangeEventArgs e)
+    private void OnModeChanged(AgentMode mode)
     {
         if (Agent.IsRunning) return;
-        if (Enum.TryParse<AgentMode>(e.Value?.ToString(), out var mode) && Enum.IsDefined(mode))
+        if (Enum.IsDefined(mode))
             Agent.Mode = mode;
     }
 

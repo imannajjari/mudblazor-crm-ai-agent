@@ -1,0 +1,139 @@
+@using MudBlazorCrmApp.Shared.Blazor.Services.Agent
+@inject AppText L
+@inject AgentClientService Agent
+@* Port of the reference TaskComposer.tsx: a rounded box with a textarea, round attach / mic /
+   send(stop) buttons at the bottom-right, the attachment chips above, and the ModePicker below. *@
+
+<div>
+    <div class="agent-composer @(Centered ? "agent-composer--centered" : "agent-composer--docked") agent-composer--with-files"
+         title="@L["AGENT_DROP_FILES"]">
+        @if (AttachedFiles.Count > 0)
+        {
+            <div class="agent-chips">
+                @foreach (var f in AttachedFiles)
+                {
+                    var stateClass = f.Error != null ? "agent-chip--failed" : (Agent.IsUploadingAttachment ? "agent-chip--uploading" : "");
+                    <span class="agent-chip @stateClass" title="@f.FileName" data-testid="agent-attach-chip">
+                        @AttachmentIcon(f.FileName)
+                        <span class="agent-chip__name">@f.FileName</span>
+                        <span class="agent-chip__meta">@(f.Error ?? FormatSize(f.SizeBytes))</span>
+                        <button type="button" class="agent-chip__remove" @onclick="@(() => RemoveAttachment.InvokeAsync(f.Id))"
+                                title="@L["AGENT_REMOVE_FILE"]" aria-label="@L["AGENT_REMOVE_FILE"]">×</button>
+                    </span>
+                }
+            </div>
+        }
+        <textarea class="agent-composer__input" rows="2"
+                  placeholder="@L["AGENT_COMPOSER_PLACEHOLDER"]"
+                  disabled="@(IsRunning || IsUploading)"
+                  value="@Value" @oninput="HandleInput" @onkeydown="OnKeyDown"
+                  data-testid="agent-input" autofocus="@Centered"></textarea>
+        <InputFile id="agent-file-input" data-testid="agent-attach-input" OnChange="OnFilesPicked" multiple
+                   accept=".txt,.md,.json,.log,.csv,.tsv,.xlsx,.png,.jpg,.jpeg,.webp" style="display:none;" />
+        <label for="agent-file-input" class="agent-composer__attach" title="@L["AGENT_ATTACH_FILES"]"
+               aria-label="@L["AGENT_ATTACH_FILES"]"
+               style="@((IsRunning || IsUploading) ? "opacity:0.35;pointer-events:none;" : "")">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M21 11.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l8.6-8.6a3.7 3.7 0 015.2 5.2l-8.6 8.6a1.8 1.8 0 01-2.6-2.6l7.9-7.9"
+                      stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+        </label>
+        <button type="button" class="agent-composer__mic @(IsListening ? "agent-composer__mic--listening" : "")"
+                @onclick="ToggleVoice" disabled="@IsRunning"
+                title="@L["AGENT_VOICE_HINT"]" aria-label="@L["AGENT_VOICE_HINT"]" data-testid="agent-voice-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8" />
+                <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+        </button>
+        @if (IsRunning)
+        {
+            <button type="button" class="agent-composer__send" @onclick="Stop"
+                    title="@L["AGENT_STOP"]" aria-label="@L["AGENT_STOP"]" data-testid="agent-stop">
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                    <rect x="2" y="2" width="10" height="10" rx="2" fill="currentColor" />
+                </svg>
+            </button>
+        }
+        else
+        {
+            <button type="button" class="agent-composer__send" @onclick="Run" disabled="@(!CanRun)"
+                    title="@L["AGENT_RUN"]" aria-label="@L["AGENT_RUN"]" data-testid="agent-run">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" stroke="currentColor" stroke-width="2"
+                          stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+            </button>
+        }
+    </div>
+    <AgentModePicker Value="Agent.Mode" OnValueChanged="ModeChanged" Disabled="IsRunning" />
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> OnInput { get; set; }
+    [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
+    [Parameter] public bool IsRunning { get; set; }
+    [Parameter] public bool IsUploading { get; set; }
+    [Parameter] public bool Centered { get; set; }
+    [Parameter] public bool IsListening { get; set; }
+    [Parameter] public IReadOnlyList<AttachedFileItem> AttachedFiles { get; set; } = [];
+    [Parameter] public EventCallback<InputFileChangeEventArgs> OnFilesSelected { get; set; }
+    [Parameter] public EventCallback<string> RemoveAttachment { get; set; }
+    [Parameter] public EventCallback Send { get; set; }
+    [Parameter] public EventCallback Stop { get; set; }
+    [Parameter] public EventCallback ToggleVoice { get; set; }
+    [Parameter] public EventCallback<AgentMode> OnModeChanged { get; set; }
+
+    private bool CanRun => Value.Trim().Length > 0 && !IsUploading;
+
+    private async Task HandleInput(ChangeEventArgs e)
+    {
+        if (OnInput.HasDelegate) await OnInput.InvokeAsync(e.Value?.ToString() ?? string.Empty);
+    }
+
+    private async Task OnFilesPicked(InputFileChangeEventArgs e)
+    {
+        if (OnFilesSelected.HasDelegate) await OnFilesSelected.InvokeAsync(e);
+    }
+
+    private async Task Run()
+    {
+        if (!CanRun) return;
+        if (Send.HasDelegate) await Send.InvokeAsync();
+    }
+
+    private async Task ModeChanged(AgentMode mode)
+    {
+        if (OnModeChanged.HasDelegate) await OnModeChanged.InvokeAsync(mode);
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):0.#} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:0.#} KB";
+        return $"{bytes} B";
+    }
+
+    private static RenderFragment AttachmentIcon(string fileName) => builder =>
+    {
+        var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+        var (kind, glyph) = ext switch
+        {
+            ".csv" or ".tsv" => ("table", "<g><line x1=\"2\" y1=\"8.5\" x2=\"14\" y2=\"8.5\" stroke=\"currentColor\" stroke-width=\"1.2\"/><line x1=\"2\" y1=\"11.5\" x2=\"14\" y2=\"11.5\" stroke=\"currentColor\" stroke-width=\"1.2\"/><line x1=\"8\" y1=\"8.5\" x2=\"8\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.2\"/></g>"),
+            ".xlsx" or ".xls" => ("sheet", "<line x1=\"2\" y1=\"8.5\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.4\"/><line x1=\"14\" y1=\"8.5\" x2=\"2\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.4\"/>"),
+            ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" => ("image", "<circle cx=\"5.8\" cy=\"6.6\" r=\"1.3\" fill=\"currentColor\"/><path d=\"M1.5 13.5l4-4.5 3 3 2.5-2.5 2.5 4z\" fill=\"currentColor\"/>"),
+            _ => ("text", "<line x1=\"5\" y1=\"7\" x2=\"11\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.2\"/><line x1=\"5\" y1=\"9.5\" x2=\"11\" y2=\"9.5\" stroke=\"currentColor\" stroke-width=\"1.2\"/><line x1=\"5\" y1=\"12\" x2=\"9\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1.2\"/>")
+        };
+        builder.OpenElement(0, "svg");
+        builder.AddAttribute(1, "class", $"agent-chip__icon agent-chip__icon--{kind}");
+        builder.AddAttribute(2, "width", "16");
+        builder.AddAttribute(3, "height", "16");
+        builder.AddAttribute(4, "viewBox", "0 0 16 16");
+        builder.AddAttribute(5, "fill", "none");
+        builder.AddAttribute(6, "aria-hidden", "true");
+        builder.AddContent(7, (MarkupString)"<path d=\"M9.5 1.5H3.5A1.5 1.5 0 0 0 2 3v10a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 13V6z\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linejoin=\"round\"/>");
+        builder.AddContent(8, (MarkupString)glyph);
+        builder.CloseElement();
+    };
+}

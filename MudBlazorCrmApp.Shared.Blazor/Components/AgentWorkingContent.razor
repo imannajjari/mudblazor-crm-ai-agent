@@ -1,0 +1,94 @@
+@using MudBlazorCrmApp.Shared.Blazor.Services.Agent
+@inject AppText L
+@* Port of the reference AgentWorkingContent (AgentWorkingMark.tsx): the animated icon,
+   the caption and the three dots, without any box around them. One svg per working mode. *@
+
+<svg class="agent-working__mark" width="26" height="20" viewBox="0 0 24 20" aria-hidden="true" focusable="false">
+    @switch (Mode)
+    {
+        case AgentWorkingMode.Think:
+            @* A barcode whose bars light up in turn while a scan line sweeps across it. *@
+            <rect class="agent-working__bar" style="animation-delay:0s" x="1" y="2" width="1.6" height="16" rx="0.4" />
+            <rect class="agent-working__bar" style="animation-delay:0.21s" x="4" y="2" width="3" height="16" rx="0.4" />
+            <rect class="agent-working__bar" style="animation-delay:0.42s" x="8.6" y="2" width="1.6" height="16" rx="0.4" />
+            <rect class="agent-working__bar" style="animation-delay:0.63s" x="11.6" y="2" width="2.4" height="16" rx="0.4" />
+            <rect class="agent-working__bar" style="animation-delay:0.84s" x="15.4" y="2" width="1.6" height="16" rx="0.4" />
+            <rect class="agent-working__bar" style="animation-delay:1.05s" x="18.4" y="2" width="3" height="16" rx="0.4" />
+            <rect class="agent-working__scan" x="0" y="0" width="1.4" height="20" rx="0.7" />
+            break;
+        case AgentWorkingMode.Screen:
+            @* A window with a line that scans down its content. *@
+            <rect class="agent-working__line" x="1" y="1.5" width="22" height="17" rx="2.5" fill="none" stroke-width="1.5" />
+            <line class="agent-working__line" x1="1" y1="6.5" x2="23" y2="6.5" stroke-width="1.5" />
+            <rect class="agent-working__scan-down" x="3" y="8" width="18" height="1.6" rx="0.8" />
+            break;
+        case AgentWorkingMode.Data:
+            @* A stack of three rows that light up one after the other. *@
+            <rect class="agent-working__bar" style="animation-delay:0s" x="3" y="2" width="18" height="4.4" rx="2.2" />
+            <rect class="agent-working__bar" style="animation-delay:0.36s" x="3" y="8" width="18" height="4.4" rx="2.2" />
+            <rect class="agent-working__bar" style="animation-delay:0.72s" x="3" y="14" width="18" height="4.4" rx="2.2" />
+            break;
+        case AgentWorkingMode.Help:
+            @* An open book whose right page turns. *@
+            <path class="agent-working__line" d="M12 4 C9 2.5 5.5 2.5 2 3.5 V16.5 C5.5 15.5 9 15.5 12 17 Z" fill="none" stroke-width="1.5" stroke-linejoin="round" />
+            <path class="agent-working__page" d="M12 4 C15 2.5 18.5 2.5 22 3.5 V16.5 C18.5 15.5 15 15.5 12 17 Z" />
+            <line class="agent-working__line" x1="5" y1="7.5" x2="9.5" y2="8.2" stroke-width="1.2" />
+            <line class="agent-working__line" x1="5" y1="10.5" x2="9.5" y2="11.2" stroke-width="1.2" />
+            break;
+        case AgentWorkingMode.Write:
+            @* Field lines written one after the other, with a blinking caret. *@
+            <rect class="agent-working__label" x="1" y="2.5" width="5" height="2.4" rx="1.2" />
+            <rect class="agent-working__field" style="animation-delay:0s" x="8" y="2.5" width="13" height="2.4" rx="1.2" />
+            <rect class="agent-working__label" x="1" y="8.5" width="5" height="2.4" rx="1.2" />
+            <rect class="agent-working__field" style="animation-delay:0.43s" x="8" y="8.5" width="13" height="2.4" rx="1.2" />
+            <rect class="agent-working__label" x="1" y="14.5" width="5" height="2.4" rx="1.2" />
+            <rect class="agent-working__field" style="animation-delay:0.86s" x="8" y="14.5" width="13" height="2.4" rx="1.2" />
+            <rect class="agent-working__caret" x="22.2" y="1.5" width="1.2" height="17" rx="0.6" />
+            break;
+        case AgentWorkingMode.Navigate:
+            @* A page on the left, an arrow moving across, a page on the right lighting up. *@
+            <rect class="agent-working__line" x="1" y="3" width="7" height="14" rx="1.6" fill="none" stroke-width="1.5" />
+            <g class="agent-working__arrow">
+                <line class="agent-working__line" x1="9.5" y1="10" x2="14.5" y2="10" stroke-width="1.6" stroke-linecap="round" />
+                <polyline class="agent-working__line" points="12.5,7.5 15,10 12.5,12.5" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+            </g>
+            <rect class="agent-working__arrive" x="16" y="3" width="7" height="14" rx="1.6" />
+            break;
+        case AgentWorkingMode.Finish:
+            @* A check mark drawn again and again. *@
+            <circle class="agent-working__line" cx="12" cy="10" r="8" fill="none" stroke-width="1.5" />
+            <polyline class="agent-working__check" points="7.5,10.5 10.8,13.5 16.5,7" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" pathLength="1" />
+            break;
+        case AgentWorkingMode.Ask:
+            @* A speech bubble with a question mark that bobs. *@
+            <g class="agent-working__bubble">
+                <path class="agent-working__line" d="M3 2.5 H21 A2 2 0 0 1 23 4.5 V12.5 A2 2 0 0 1 21 14.5 H11 L6.5 18.5 V14.5 H3 A2 2 0 0 1 1 12.5 V4.5 A2 2 0 0 1 3 2.5 Z" fill="none" stroke-width="1.5" stroke-linejoin="round" />
+                <path class="agent-working__mark-question" d="M9.8 6.6 A2.2 2.2 0 1 1 12.9 8.6 C12.2 9 12 9.4 12 10.2" fill="none" stroke-width="1.6" stroke-linecap="round" />
+                <circle class="agent-working__caret" cx="12" cy="12.2" r="0.9" />
+            </g>
+            break;
+    }
+</svg>
+<span class="agent-working__text">@Caption</span>
+@if (Mode != AgentWorkingMode.Ask)
+{
+    <span class="agent-working__dots" aria-hidden="true">
+        <i></i><i></i><i></i>
+    </span>
+}
+
+@code {
+    [Parameter] public AgentWorkingMode Mode { get; set; } = AgentWorkingMode.Think;
+
+    private string Caption => Mode switch
+    {
+        AgentWorkingMode.Screen => L["AGENT_WORKING_SCREEN"],
+        AgentWorkingMode.Data => L["AGENT_WORKING_DATA"],
+        AgentWorkingMode.Help => L["AGENT_WORKING_HELP"],
+        AgentWorkingMode.Write => L["AGENT_WORKING_WRITE"],
+        AgentWorkingMode.Navigate => L["AGENT_WORKING_NAVIGATE"],
+        AgentWorkingMode.Finish => L["AGENT_WORKING_FINISH"],
+        AgentWorkingMode.Ask => L["AGENT_WORKING_ASK"],
+        _ => L["AGENT_THINKING"]
+    };
+}

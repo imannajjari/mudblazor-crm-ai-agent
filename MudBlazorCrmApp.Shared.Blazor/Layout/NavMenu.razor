@@ -41,19 +41,33 @@
             </MudBadge>
             @if (_agentEnabled)
             {
-                <button class="agent-ai-btn mx-1 @(Agent.IsDrawerOpen ? "agent-ai-btn--active" : "")"
+                <button class="agent-header-button mx-1 @(Agent.IsDrawerOpen ? "agent-header-button--open" : "")"
                         title="@L["AGENT_BUTTON_TOOLTIP"]"
+                        aria-label="@L["AGENT_TITLE"]"
+                        aria-pressed="@(Agent.IsDrawerOpen ? "true" : "false")"
+                        aria-busy="@(Agent.IsRunning ? "true" : "false")"
                         @onclick="@(() => { Agent.IsDrawerOpen = !Agent.IsDrawerOpen; })"
                         data-testid="agent-open-button">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="agent-ai-btn__svg">
-                        <path d="M12 2C12 2 13.5 7.5 17 10C13.5 12.5 12 18 12 18C12 18 10.5 12.5 7 10C10.5 7.5 12 2 12 2Z" fill="#ffffff"/>
-                        <circle cx="19" cy="5" r="1.4" fill="#e0e7ff"/>
-                        <circle cx="5" cy="16" r="1.1" fill="#e0e7ff" opacity="0.85"/>
-                        <circle cx="18.5" cy="17" r="0.85" fill="#e0e7ff" opacity="0.75"/>
+                    <svg class="agent-robot @(Agent.IsRunning ? "agent-robot--working" : "")"
+                         width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                         aria-hidden="true" focusable="false">
+                        <line x1="12" y1="2.5" x2="12" y2="6" />
+                        <circle class="agent-robot__light" cx="12" cy="2.4" r="1.1" fill="currentColor" stroke="none" />
+                        <rect x="4" y="6" width="16" height="12.5" rx="4" />
+                        <line x1="1.8" y1="11" x2="1.8" y2="14.5" />
+                        <line x1="22.2" y1="11" x2="22.2" y2="14.5" />
+                        <g class="agent-robot__eyes" fill="currentColor" stroke="none">
+                            <circle cx="9" cy="11.8" r="1.7" />
+                            <circle cx="15" cy="11.8" r="1.7" />
+                        </g>
+                        <line x1="9.5" y1="15.6" x2="14.5" y2="15.6" />
+                        <line x1="8" y1="18.5" x2="8" y2="21.5" />
+                        <line x1="16" y1="18.5" x2="16" y2="21.5" />
                     </svg>
                     @if (Agent.IsRunning)
                     {
-                        <span class="agent-ai-btn__working-dot"></span>
+                        <span class="agent-robot-button__working-dot"></span>
                     }
                 </button>
             }

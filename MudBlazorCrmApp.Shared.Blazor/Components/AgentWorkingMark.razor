@@ -1,0 +1,16 @@
+@using MudBlazorCrmApp.Shared.Blazor.Services.Agent
+@* Port of the reference AgentWorkingMark: the content wrapped in div.agent-working.
+   Returns nothing when not active. TestId keeps the e2e contract (agent-working). *@
+
+@if (IsActive)
+{
+    <div class="agent-working" role="status" aria-live="polite" data-mode="@Mode.ToString().ToLowerInvariant()" data-testid="@TestId">
+        <AgentWorkingContent Mode="Mode" />
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsActive { get; set; }
+    [Parameter] public AgentWorkingMode Mode { get; set; } = AgentWorkingMode.Think;
+    [Parameter] public string? TestId { get; set; }
+}

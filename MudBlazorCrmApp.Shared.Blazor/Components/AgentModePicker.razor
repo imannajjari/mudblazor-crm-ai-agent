@@ -1,0 +1,103 @@
+@using MudBlazorCrmApp.Shared.Blazor.Services.Agent
+@inject AppText L
+@inject AgentClientService Agent
+@* Port of the reference ModePicker.tsx: a dropdown that opens above the composer.
+   A hidden native <select data-testid="agent-mode"> stays in sync so the e2e contract
+   (toHaveValue / inputValue on "agent-mode") keeps working. *@
+
+<div class="agent-mode">
+    <button type="button" class="agent-mode__trigger" aria-haspopup="listbox"
+            aria-expanded="@(_open ? "true" : "false")" disabled="@Disabled"
+            @onclick="Toggle">
+        @CaptionFor(Value)
+        <span class="agent-mode__caret" aria-hidden="true"></span>
+    </button>
+
+    @if (_open)
+    {
+        <div class="agent-mode-backdrop" @onclick="Close"></div>
+        <div class="agent-mode__menu" role="listbox" aria-label="@L["AGENT_MODE"]">
+            <div class="agent-mode__title">@L["AGENT_MODE"]</div>
+            @foreach (var mode in Modes)
+            {
+                <button type="button" role="option" aria-selected="@(mode == Value ? "true" : "false")"
+                        class="agent-mode__option @(mode == Value ? "agent-mode__option--selected" : "")"
+                        @onclick="@(() => Choose(mode))">
+                    <span class="agent-mode__text">
+                        <span class="agent-mode__name">@CaptionFor(mode)</span>
+                        <span class="agent-mode__hint">@HintFor(mode)</span>
+                    </span>
+                    <span class="agent-mode__side">
+                        @if (mode == Value)
+                        {
+                            <span class="agent-mode__check" aria-hidden="true"></span>
+                        }
+                        <span class="agent-mode__number">@((int)mode + 1)</span>
+                    </span>
+                </button>
+            }
+            @if (Agent.HasAlwaysAllowed)
+            {
+                <button type="button" class="agent-mode__clear" @onclick="ClearAlwaysAllowed">
+                    @L["AGENT_CLEAR_ALWAYS_ALLOW_CHOICES"]
+                </button>
+            }
+        </div>
+    }
+
+    <select data-testid="agent-mode" value="@Value" @onchange="OnNativeChange" hidden aria-hidden="true"
+            style="position:absolute;width:0;height:0;opacity:0;pointer-events:none;">
+        @foreach (var mode in Modes)
+        {
+            <option value="@mode">@CaptionFor(mode)</option>
+        }
+    </select>
+</div>
+
+@code {
+    [Parameter] public AgentMode Value { get; set; } = AgentMode.Manual;
+    [Parameter] public EventCallback<AgentMode> OnValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private bool _open;
+    private static readonly AgentMode[] Modes = [AgentMode.Manual, AgentMode.SemiAuto, AgentMode.Auto];
+
+    private void Toggle()
+    {
+        if (!Disabled) _open = !_open;
+    }
+
+    private void Close() => _open = false;
+
+    private async Task Choose(AgentMode mode)
+    {
+        _open = false;
+        if (Disabled || mode == Value) return;
+        if (OnValueChanged.HasDelegate) await OnValueChanged.InvokeAsync(mode);
+    }
+
+    private async Task OnNativeChange(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<AgentMode>(e.Value?.ToString(), out var mode) && Enum.IsDefined(mode) && mode != Value
+            && OnValueChanged.HasDelegate)
+        {
+            await OnValueChanged.InvokeAsync(mode);
+        }
+    }
+
+    private void ClearAlwaysAllowed() => Agent.ClearAlwaysAllowed();
+
+    private string CaptionFor(AgentMode mode) => mode switch
+    {
+        AgentMode.SemiAuto => L["AGENT_MODE_SEMIAUTO"],
+        AgentMode.Auto => L["AGENT_MODE_AUTO"],
+        _ => L["AGENT_MODE_MANUAL"]
+    };
+
+    private string HintFor(AgentMode mode) => mode switch
+    {
+        AgentMode.SemiAuto => L["AGENT_MODE_SEMIAUTO_HINT"],
+        AgentMode.Auto => L["AGENT_MODE_AUTO_HINT"],
+        _ => L["AGENT_MODE_MANUAL_HINT"]
+    };
+}

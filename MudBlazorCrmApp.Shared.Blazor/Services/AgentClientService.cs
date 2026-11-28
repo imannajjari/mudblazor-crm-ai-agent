@@ -60,6 +60,12 @@ public sealed class AgentClientService(
     public int TotalOutputTokens { get; private set; }
     public decimal TotalCost { get; private set; }
     public bool ShowCost { get; private set; } = true;
+    public bool HasAlwaysAllowed => permissionGate.HasAlwaysAllowed;
+    public void ClearAlwaysAllowed()
+    {
+        permissionGate.ClearAlwaysAllowed();
+        NotifyChanged();
+    }
     public int MaxTaskSteps { get; private set; } = 25;
     public int MaxPriorTurns { get; private set; } = 80;
     public decimal MaxTaskCostUsd { get; private set; } = 0.80m;
@@ -254,7 +260,7 @@ public sealed class AgentClientService(
         WaitingForUserAnswer = false;
         PendingQuestion = null;
         PendingQuestionOptions = null;
-        _entries.Add(new AgentChatEntry("user", answer));
+        _entries.Add(new AgentChatEntry("user", answer, SubType: "answer"));
         NotifyChanged();
         _userAnswerTcs.TrySetResult(answer);
     }
@@ -286,7 +292,7 @@ public sealed class AgentClientService(
         var run = new TaskRunState(CurrentChatKey, _nextTaskSeq++, DateTimeOffset.UtcNow);
         var ledger = new List<string>();
         var priorTurns = _entries.Where(e => e.Kind is "user" or "assistant").TakeLast(MaxPriorTurns).ToList();
-        _entries.Add(new AgentChatEntry("user", goal));
+        _entries.Add(new AgentChatEntry("user", goal, SubType: "task"));
         NotifyChanged();
 
         var messages = new List<string>();
@@ -557,5 +563,5 @@ public sealed class AgentClientService(
     private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
     private void NotifyChanged() => OnStateChanged?.Invoke();
     public void Dispose() { Stop(); _cts?.Dispose(); }
-    public sealed record AgentChatEntry(string Kind, string Text, bool IsBlocked = false);
+    public sealed record AgentChatEntry(string Kind, string Text, bool IsBlocked = false, string? SubType = null);
 }

@@ -29,6 +29,10 @@ public sealed class AgentPermissionGate
         _approvedDestructiveTargets.Clear();
     }
 
+    public bool HasAlwaysAllowed => _alwaysAllowed.Count > 0;
+
+    public void ClearAlwaysAllowed() => _alwaysAllowed.Clear();
+
     public void ClearTaskDeclines()
     {
         _declined.Clear();
