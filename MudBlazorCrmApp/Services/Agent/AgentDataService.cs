@@ -3,8 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Web;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Options;
 
 namespace MudBlazorCrmApp.Services.Agent;
@@ -12,7 +10,6 @@ namespace MudBlazorCrmApp.Services.Agent;
 public sealed class AgentDataService(
     IHttpClientFactory httpClientFactory,
     IHttpContextAccessor httpContextAccessor,
-    IServer server,
     IOptions<AgentOptions> optionsAccessor) : IAgentDataReader
 {
     private const int MaxResponseChars = 6000;
@@ -125,28 +122,36 @@ public sealed class AgentDataService(
         }
     }
 
-    private string ResolveBaseUri(HttpContext httpCtx)
+    private string ResolveBaseUri(HttpContext httpCtx) =>
+        ResolveLoopbackBase(optionsAccessor.Value.LoopbackBaseUrl, httpCtx.Request.Scheme, httpCtx.Connection.LocalPort);
+
+    // Pure (testable) base resolution for the loopback self-call. The connection's own local port is
+    // the only port guaranteed to belong to the listener that served this request: scanning the server
+    // address list for the "first same-scheme bind" would self-call a DIFFERENT listener on
+    // multi-bind launches (e.g. two https ports -> wrong cert/app). The scheme is the one this request
+    // arrived on; loopback requests are exempted from HTTPS redirection in Program.cs, so this cannot
+    // bounce with a 307 (the Loopback client never follows redirects).
+    public static string ResolveLoopbackBase(string? configured, string scheme, int localPort)
     {
-        var configured = optionsAccessor.Value.LoopbackBaseUrl;
-        if (!string.IsNullOrWhiteSpace(configured) && Uri.TryCreate(configured, UriKind.Absolute, out var cfgUri) && cfgUri.IsLoopback)
-            return cfgUri.GetLeftPart(UriPartial.Authority);
+        if (TrySanitizeConfiguredBase(configured, out var configuredBase))
+            return configuredBase;
 
-        // Prefer the scheme+port the current request actually arrived on: it already passed the
-        // HTTPS-redirection middleware, so the self-call cannot bounce with a 307. (The old
-        // http-bind preference made every read_data loopback hit UseHttpsRedirection -> 307.)
-        var reqPort = httpCtx.Connection.LocalPort > 0 ? httpCtx.Connection.LocalPort : 5025;
-        var reqScheme = string.Equals(httpCtx.Request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
-
-        var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
-        var sameSchemeBind = addresses?.FirstOrDefault(a => a.StartsWith($"{reqScheme}://", StringComparison.OrdinalIgnoreCase));
-        if (sameSchemeBind == null)
-            return $"{reqScheme}://127.0.0.1:{reqPort}";
-
-        var normalized = sameSchemeBind.Replace("*", "127.0.0.1").Replace("+", "127.0.0.1").Replace("[::]", "127.0.0.1").Replace("0.0.0.0", "127.0.0.1");
-        if (Uri.TryCreate(normalized, UriKind.Absolute, out var boundUri))
-            return $"{reqScheme}://127.0.0.1:{boundUri.Port}";
-
+        var reqPort = localPort > 0 ? localPort : 5025;
+        var reqScheme = string.Equals(scheme, "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
         return $"{reqScheme}://127.0.0.1:{reqPort}";
+    }
+
+    // A configured override must be a plain http(s) loopback URL: userinfo would smuggle credentials
+    // into the self-call, and a non-http(s) or non-loopback target is out of contract.
+    public static bool TrySanitizeConfiguredBase(string? configured, out string configuredBase)
+    {
+        configuredBase = "";
+        if (string.IsNullOrWhiteSpace(configured)) return false;
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return false;
+        if (uri.UserInfo.Length > 0 || !uri.IsLoopback) return false;
+        configuredBase = uri.GetLeftPart(UriPartial.Authority);
+        return true;
     }
 
     private static string BuildRelativeUri(DataSourceDef def, int top, int skip, string? search, string? status)

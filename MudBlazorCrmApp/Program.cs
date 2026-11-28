@@ -174,12 +174,12 @@ builder.Services.AddHttpClient("Loopback")
     {
         AllowAutoRedirect = false,
         UseCookies = false,
-        // The target is always loopback (AgentDataService.ResolveBaseUri enforces IsLoopback), so the
+        // The target is always loopback (AgentDataService.ResolveLoopbackBase enforces it), so the
         // self-signed Kestrel dev cert cannot come from a public CA. Traffic never leaves the machine,
         // so accept any cert presented on a loopback URL; without this the agent's https self-call
         // dies with HttpRequestException (dev cert not in the machine trust store).
         ServerCertificateCustomValidationCallback = (request, cert, _, _) =>
-            request.RequestUri != null && request.RequestUri.IsLoopback && cert != null
+            AgentLoopbackPolicy.AcceptLoopbackCertificate(request, cert)
     });
 builder.Services.AddSingleton<IAgentRateLimiter, MemoryCacheRateLimiter>();
 builder.Services.AddSingleton<IAgentHelpCatalog, AgentHelpService>();
@@ -248,8 +248,15 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
-app.UseHttpsRedirection();
+// ForwardedHeaders must run before anything that reads Request.Scheme (redirect, agent self-call),
+// so an operator-configured proxy's X-Forwarded-Proto is honored consistently.
 app.UseForwardedHeaders();
+// Loopback self-calls (agent read_data) are exempt: they reach Kestrel on the exact scheme/port the
+// originating agent request used, and following a redirect off-loopback is blocked anyway
+// (AllowAutoRedirect=false), so an https->http redirect bounce would only break the tool.
+app.UseWhen(
+    ctx => !(ctx.Connection.RemoteIpAddress is { } ip && System.Net.IPAddress.IsLoopback(ip)),
+    b => b.UseHttpsRedirection());
 
 if (app.Environment.IsDevelopment())
 {
