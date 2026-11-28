@@ -478,7 +478,7 @@ public sealed class AgentClientService(
 
             emptyRetries = 0;
             var serverResults = AgentClientTranscriptHelper.ParseServerToolResults(stepRes.ServerToolResults, logger);
-            var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, recentSignatures, snapshotJson, tracker, ct);
+            var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, recentSignatures, snapshotJson, tracker, step < MaxTaskSteps - 1 && !injectedFinalCall, ct);
             snapshotJson = updatedSnap;
             if (finished) return finalSummary;
 
@@ -527,18 +527,18 @@ public sealed class AgentClientService(
     private async Task<(bool Finished, string Summary, string SnapshotJson)> ExecuteToolBatchAsync(
         List<AgentToolCall> toolCalls, Dictionary<string, string> serverResults, TaskRunState run,
         List<string> messages, List<string> ledger, List<string> recentSignatures, string snapshotJson,
-        AgentTaskRepeatTracker tracker, CancellationToken ct)
+        AgentTaskRepeatTracker tracker, bool allowLearningNudge, CancellationToken ct)
     {
         foreach (var call in toolCalls)
         {
             var toolEntryIndex = _entries.Count;
             _entries.Add(new AgentChatEntry("tool", $"{call.Name}({call.ArgsJson})"));
             recentSignatures.Add($"{call.Name}:{call.ArgsJson.Trim()}");
-            tracker.MarkAction(call.Name);
             NotifyChanged();
 
             if (serverResults.TryGetValue(call.Id, out var serverMsg))
             {
+                tracker.MarkAction(call.Name); // server tool ran (even if policy-blocked)
                 if (call.Name == "read_data") toolDispatcher.MarkRecordRead();
                 if (serverMsg.Contains("\"blocked\":true", StringComparison.Ordinal))
                     _entries[toolEntryIndex] = _entries[toolEntryIndex] with { IsBlocked = true };
@@ -575,14 +575,16 @@ public sealed class AgentClientService(
             _lastLedger.AddRange(ledger.Distinct(StringComparer.Ordinal));
             messages.Add(AgentClientTranscriptHelper.SerializeToolResult(call.Id, resJson));
 
-            if (isFinish && tracker.ShouldNudgeLearning())
+            if (isFinish && allowLearningNudge && tracker.ShouldNudgeLearning())
             {
                 // One-shot learning nudge: a long task that never touched remember/correct_fact
                 // gets one chance to record a lesson; the next finish is accepted unconditionally.
+                // Never fires when the loop guard already forced the finish or on the last step /
+                // after "[final call]" (there is no spare step to act on it -> the Done would be lost).
                 messages.Add(JsonSerializer.Serialize(new
                 {
                     role = "user",
-                    content = "[learning nudge] This task took many steps. If the user taught a reusable CRM rule or you learned a convention worth keeping, call `remember` now (or `correct_fact` if a fact you were shown was wrong). If nothing is worth learning, call `finish` again with the same summary."
+                    content = "[learning nudge] This task took many steps. If the user taught a reusable CRM rule or you learned a convention worth keeping and the `remember` / `correct_fact` tools are available, call one now. If they are not available or nothing is worth learning, call `finish` again with the same summary."
                 }));
                 break;
             }

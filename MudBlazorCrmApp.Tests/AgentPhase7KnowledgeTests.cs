@@ -73,11 +73,11 @@ public class AgentPhase7KnowledgeTests
         var old = now.AddDays(-120);
         var shouldPurge = AgentKnowledgePurger.OlderThan(AgentKnowledgePurger.Cutoff(now)).Compile();
 
-        Assert.True(shouldPurge(Fact(created: old.AddDays(-10)))); // created long ago, never used
-        Assert.True(shouldPurge(Fact(created: old, modified: old, lastUsed: old, useCount: 9))); // old but used long ago
-        Assert.False(shouldPurge(Fact(created: old, modified: now.AddDays(-5)))); // touched recently
-        Assert.False(shouldPurge(Fact(created: old, lastUsed: now.AddDays(-5), useCount: 3))); // used recently and enough
-        Assert.True(shouldPurge(Fact(created: old, lastUsed: now.AddDays(-5), useCount: 2))); // used recently but never earned use
+        Assert.True(shouldPurge(Row(created: old.AddDays(-10)))); // created long ago, never used
+        Assert.True(shouldPurge(Row(created: old, modified: old, lastUsed: old, useCount: 9))); // old but used long ago
+        Assert.False(shouldPurge(Row(created: old, modified: now.AddDays(-5)))); // touched recently
+        Assert.False(shouldPurge(Row(created: old, lastUsed: now.AddDays(-5), useCount: 3))); // used recently and enough
+        Assert.True(shouldPurge(Row(created: old, lastUsed: now.AddDays(-5), useCount: 2))); // used recently but never earned use
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class AgentPhase7KnowledgeTests
         Assert.Equal(3, AgentKnowledgePurger.MinUseCountToKeep);
     }
 
-    private static AgentKnowledge Fact(
+    private static AgentKnowledge Row(
         DateTime created, DateTime? modified = null, DateTime? lastUsed = null, int useCount = 0) =>
         new()
         {
