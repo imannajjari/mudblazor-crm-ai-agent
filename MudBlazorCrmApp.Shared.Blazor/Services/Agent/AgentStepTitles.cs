@@ -27,6 +27,9 @@ public static partial class AgentLogViewBuilder
         ["scan_tabs"] = new(AgentWorkingMode.Screen, "AGENT_STEP_SCAN_TABS", null),
         ["scan_menus"] = new(AgentWorkingMode.Screen, "AGENT_STEP_SCAN_MENUS", null),
         ["scan_context_menu"] = new(AgentWorkingMode.Screen, "AGENT_STEP_SCAN_CONTEXT_MENU", null),
+        ["read_grid_headers"] = new(AgentWorkingMode.Screen, "AGENT_STEP_READ_GRID_HEADERS", null),
+        ["scroll_grid"] = new(AgentWorkingMode.Screen, "AGENT_STEP_SCROLL_GRID", [["direction"]]),
+        ["select_grid_row"] = new(AgentWorkingMode.Navigate, "AGENT_STEP_SELECT_ROW", [["rowId", "id"]]),
 
         ["read_data"] = new(AgentWorkingMode.Data, "AGENT_STEP_READ_DATA", [["name", "source"]]),
         ["list_attachments"] = new(AgentWorkingMode.Data, "AGENT_STEP_LIST_ATTACHMENTS", null),
@@ -38,6 +41,13 @@ public static partial class AgentLogViewBuilder
         ["get_help_page"] = new(AgentWorkingMode.Help, "AGENT_STEP_READ_HELP_PAGE", [["page", "path"]]),
         ["lookup_term"] = new(AgentWorkingMode.Help, "AGENT_STEP_LOOK_UP_NAME", [["term", "query"]]),
         ["ask_knowledge"] = new(AgentWorkingMode.Help, "AGENT_STEP_LOOK_UP_NAME", [["term", "query"]]),
+        ["remember"] = new(AgentWorkingMode.Help, "AGENT_STEP_REMEMBER", [["topic"]]),
+        ["correct_fact"] = new(AgentWorkingMode.Help, "AGENT_STEP_CORRECT_FACT", [["fact_id"]]),
+        ["delete_fact"] = new(AgentWorkingMode.Help, "AGENT_STEP_DELETE_FACT", [["fact_id"]]),
+        ["fact_did_not_help"] = new(AgentWorkingMode.Help, "AGENT_STEP_FACT_NOT_HELPFUL", [["fact_id"]]),
+        ["create_chart"] = new(AgentWorkingMode.Data, "AGENT_STEP_CREATE_CHART", [["title"]]),
+        ["run_business_action"] = new(AgentWorkingMode.Navigate, "AGENT_STEP_RUN_BUSINESS_ACTION", [["action"]]),
+        ["upload_file_to_screen"] = new(AgentWorkingMode.Write, "AGENT_STEP_UPLOAD_FILE", [["attachmentId", "id"]]),
 
         ["set_field"] = new(AgentWorkingMode.Write, "AGENT_STEP_FILL", [["id", "field"], ["value"]]),
         ["click_action"] = new(AgentWorkingMode.Write, "AGENT_STEP_CLICK_ACTION", [["id", "text"]]),

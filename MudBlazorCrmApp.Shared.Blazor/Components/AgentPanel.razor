@@ -90,6 +90,7 @@
                     <div class="agent-panel__welcome">
                         <div class="agent-panel__welcome-title">@_greeting</div>
                         <AgentComposer Value="@_taskInput" Centered="true"
+                                       AttachmentsEnabled="Agent.AttachmentsEnabled"
                                        IsRunning="Agent.IsRunning" IsUploading="Agent.IsUploadingAttachment"
                                        Mode="Agent.Mode" HasAlwaysAllowed="Agent.HasAlwaysAllowed"
                                        OnClearAlwaysAllowed="Agent.ClearAlwaysAllowed"
@@ -141,7 +142,8 @@
 
                         @if (Agent.TotalCalls > 0)
                         {
-                            <div class="agent-stats" data-testid="agent-stats">
+                            <div class="agent-stats" data-testid="agent-stats"
+                                 title="@(Agent.LastStepTimings.Count > 0 ? string.Join(" · ", Agent.LastStepTimings) : null)">
                                 @string.Format(L["AGENT_STATS_FORMAT"], Agent.TotalCalls, Agent.TotalInputTokens, Agent.TotalOutputTokens)
                                 @if (Agent.ShowCost)
                                 {
@@ -242,6 +244,7 @@
                         else
                         {
                             <AgentComposer Value="@_taskInput" Centered="false"
+                                           AttachmentsEnabled="Agent.AttachmentsEnabled"
                                            IsRunning="Agent.IsRunning" IsUploading="Agent.IsUploadingAttachment"
                                            Mode="Agent.Mode" HasAlwaysAllowed="Agent.HasAlwaysAllowed"
                                            OnClearAlwaysAllowed="Agent.ClearAlwaysAllowed"
@@ -389,7 +392,7 @@
     [JSInvokable]
     public async Task OnFileDropped(string fileName, string base64)
     {
-        if (Agent.IsRunning || Agent.IsUploadingAttachment) return;
+        if (!Agent.AttachmentsEnabled || Agent.IsRunning || Agent.IsUploadingAttachment) return;
         try
         {
             var bytes = Convert.FromBase64String(base64);

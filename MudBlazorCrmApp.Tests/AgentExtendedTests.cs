@@ -258,7 +258,7 @@ public class AgentExtendedTests
             opts,
             NullLogger<AgentService>.Instance);
 
-        var controller = new AgentController(service, opts)
+        var controller = new AgentController(service, new AgentAttachmentPolicy(opts), opts)
         {
             ControllerContext = new ControllerContext
             {
@@ -273,6 +273,24 @@ public class AgentExtendedTests
 
         var stepResult = await controller.StepAsync(new AgentStepRequestModel { Messages = ["""{"role":"user","content":"hi"}"""] }, CancellationToken.None);
         Assert.IsType<NotFoundResult>(stepResult.Result);
+    }
+
+    [Theory]
+    [InlineData("OpenAiCompatible", "http://localhost:4000/v1/", null, true)]
+    [InlineData("Anthropic", "https://api.anthropic.com/v1/", null, false)]
+    [InlineData("Anthropic", "https://api.anthropic.com/v1/", true, true)]
+    [InlineData("OpenAiCompatible", "http://localhost:4000/v1/", false, false)]
+    public void Status_ExposesAttachmentPolicy_SoTheUiCanHideTheAttachButton(
+        string provider, string baseUrl, bool? attachmentsEnabled, bool expected)
+    {
+        var opts = Options.Create(new AgentOptions
+        {
+            Enabled = true, Provider = provider, BaseUrl = baseUrl, AttachmentsEnabled = attachmentsEnabled
+        });
+        var controller = new AgentController(null!, new AgentAttachmentPolicy(opts), opts);
+
+        var ok = Assert.IsType<OkObjectResult>(controller.Status().Result);
+        Assert.Equal(expected, Assert.IsType<AgentStatusModel>(ok.Value).AttachmentsEnabled);
     }
 
     [Fact]

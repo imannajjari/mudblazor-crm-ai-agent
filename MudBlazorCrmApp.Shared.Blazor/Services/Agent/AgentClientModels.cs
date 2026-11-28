@@ -44,6 +44,12 @@ internal sealed class AgentStatusDto
     public decimal MaxTaskCostUsd { get; set; } = 0.80m;
     public bool ShowCost { get; set; } = true;
     public bool Vision { get; set; } = true;
+    public bool AttachmentsEnabled { get; set; } = true;
+}
+
+internal sealed class ChatAttachmentListDto
+{
+    public List<AttachmentUploadResponseDto>? Items { get; set; }
 }
 
 internal sealed class AgentStepResponseDto
@@ -51,6 +57,7 @@ internal sealed class AgentStepResponseDto
     public string? Assistant { get; set; }
     public List<string>? Prior { get; set; }
     public List<string>? ServerToolResults { get; set; }
+    public List<string>? Timings { get; set; }
     public AgentUsageDto? Usage { get; set; }
     public string? Error { get; set; }
     public decimal? MaxTaskCostUsd { get; set; }
@@ -105,6 +112,17 @@ internal sealed class AgentStepApiClient(HttpClient httpClient, IAccessTokenProv
             }
         }
         return await res.Content.ReadFromJsonAsync<AttachmentUploadResponseDto>(cancellationToken: ct);
+    }
+
+    public async Task<List<AttachedFileItem>?> ListChatAttachmentsAsync(string chatKey, CancellationToken ct)
+    {
+        using var res = await SendAuthorizedAsync(HttpMethod.Get, $"/api/agent/attachment/chat/{Uri.EscapeDataString(chatKey)}", null, ct);
+        if (!res.IsSuccessStatusCode) return null; // null (error) stays distinct from an empty list (success)
+        var payload = await res.Content.ReadFromJsonAsync<ChatAttachmentListDto>(cancellationToken: ct);
+        return (payload?.Items ?? [])
+            .Where(i => !string.IsNullOrWhiteSpace(i.Id) && i.ExpiresUtc > DateTime.UtcNow)
+            .Select(i => new AttachedFileItem(i.Id!, i.FileName ?? i.Id!, i.Kind ?? "File", i.SizeBytes, i.ExpiresUtc))
+            .ToList();
     }
 
     public async Task DeleteAttachmentAsync(string id, CancellationToken ct)

@@ -182,6 +182,16 @@ public class AppText
         ["AGENT_STEP_LIST_ATTACHMENTS"] = ("فهرست پیوست‌ها", "List the attachments"),
         ["AGENT_STEP_READ_ATTACHMENT"] = ("خواندن پیوست «{0}»", "Read the attachment “{0}”"),
         ["AGENT_STEP_ASK_ATTACHMENT"] = ("پرسش درباره پیوست «{0}»", "Ask about the attachment “{0}”"),
+        ["AGENT_STEP_READ_GRID_HEADERS"] = ("بررسی ستون‌های جدول", "Read the table columns"),
+        ["AGENT_STEP_SCROLL_GRID"] = ("پیمایش جدول: {0}", "Scroll the table: {0}"),
+        ["AGENT_STEP_SELECT_ROW"] = ("انتخاب ردیف «{0}»", "Select the row “{0}”"),
+        ["AGENT_STEP_REMEMBER"] = ("ذخیره نکته در دانش مشترک: «{0}»", "Save a note to the knowledge base: “{0}”"),
+        ["AGENT_STEP_CORRECT_FACT"] = ("اصلاح نکتهٔ ذخیره‌شده «{0}»", "Correct the saved note “{0}”"),
+        ["AGENT_STEP_DELETE_FACT"] = ("حذف نکتهٔ ذخیره‌شده «{0}»", "Delete the saved note “{0}”"),
+        ["AGENT_STEP_FACT_NOT_HELPFUL"] = ("ثبت نکتهٔ بی‌فایده «{0}»", "Mark the note “{0}” as not helpful"),
+        ["AGENT_STEP_CREATE_CHART"] = ("ساخت نمودار: «{0}»", "Build the chart: “{0}”"),
+        ["AGENT_STEP_RUN_BUSINESS_ACTION"] = ("اجرای کار «{0}»", "Run the “{0}” action"),
+        ["AGENT_STEP_UPLOAD_FILE"] = ("بارگذاری پیوست «{0}» در صفحه", "Upload the attachment “{0}” to the screen"),
         ["AGENT_STEP_FINISH"] = ("پایان و جمع‌بندی", "Finish and summarize"),
 
         // Common UI & Dialogs

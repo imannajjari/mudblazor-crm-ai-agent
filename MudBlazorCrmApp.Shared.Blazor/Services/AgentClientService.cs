@@ -147,6 +147,11 @@ public sealed class AgentClientService(
         try
         {
             var items = await _stepApi.ListChatAttachmentsAsync(chatKey, CancellationToken.None);
+            if (items == null)
+            {
+                logger.LogDebug("Attachment list request for chat {ChatKey} returned a non-success status.", chatKey);
+                return;
+            }
             if (items.Count == 0 || chatKey != CurrentChatKey) return;
             _attachedFiles.AddRange(items.Where(i => _attachedFiles.All(f => f.Id != i.Id)));
             NotifyChanged();
@@ -325,6 +330,7 @@ public sealed class AgentClientService(
         var messages = new List<string>();
         var lastSummary = string.Empty;
         var tracker = new AgentTaskRepeatTracker();
+        _lastStepTimings = [];
         try
         {
             var isDeleteGoal = AgentLoopGuards.IsDeleteTaskGoal(goal);

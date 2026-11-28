@@ -10,6 +10,7 @@ namespace MudBlazorCrmApp.Controllers;
 [ApiController]
 public class AgentController(
     AgentService agentService,
+    AgentAttachmentPolicy attachmentPolicy,
     IOptions<AgentOptions> optionsAccessor) : ControllerBase
 {
     [AllowAnonymous]
@@ -27,7 +28,8 @@ public class AgentController(
             MaxTaskModelCalls = opts.MaxTaskModelCalls,
             MaxTaskCostUsd = opts.MaxTaskCostUsd,
             ShowCost = opts.ShowCost,
-            Vision = opts.Vision
+            Vision = opts.Vision,
+            AttachmentsEnabled = attachmentPolicy.IsEnabled
         });
     }
 

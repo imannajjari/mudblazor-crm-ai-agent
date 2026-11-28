@@ -85,6 +85,23 @@ public class AgentLogViewTests
     }
 
     [Fact]
+    public void EveryServerDeclaredTool_HasAStepCaption_InBothLanguages()
+    {
+        var names = MudBlazorCrmApp.Services.Agent.AgentToolSchemas.GetTools()
+            .Select(t => t.GetProperty("function").GetProperty("name").GetString()!)
+            .ToList();
+        Assert.NotEmpty(names);
+
+        foreach (var lang in new[] { "fa", "en" })
+        {
+            var text = new AppText();
+            text.SetLanguage(lang);
+            foreach (var name in names)
+                Assert.NotEqual(name, AgentLogViewBuilder.StepTitle($"{name}({{}})", text));
+        }
+    }
+
+    [Fact]
     public void CurrentMode_MapsFromNewestTool_AndAskWhenWaiting()
     {
         var entries = new[] { Entry("tool", "set_field({\"id\":\"name\",\"value\":\"x\"})") };

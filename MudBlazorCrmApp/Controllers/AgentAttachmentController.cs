@@ -44,8 +44,10 @@ public partial class AgentAttachmentController(
     {
         if (!policy.IsEnabled) return NotFound();
         if (!ChatKeyRegex().IsMatch(chatKey ?? "")) return BadRequest(new { error = "The chat key is not valid." });
-        var ids = attachmentService.ListForChat(User.GetAgentUserKey(), chatKey!).Select(a => a.Id).ToList();
-        return Ok(new { ids });
+        var records = attachmentService.ListForChat(User.GetAgentUserKey(), chatKey!);
+        var ids = records.Select(a => a.Id).ToList();
+        var items = records.Select(a => new { id = a.Id, fileName = a.FileName, kind = a.Kind, sizeBytes = a.SizeBytes, expiresUtc = a.ExpiresUtc }).ToList();
+        return Ok(new { ids, items });
     }
 
     [HttpDelete("{id}")]
