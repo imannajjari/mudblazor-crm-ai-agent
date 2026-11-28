@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace MudBlazorCrmApp.Shared.Blazor.Services.Agent;
@@ -18,13 +19,20 @@ public static class AgentTaskOutcomeMemory
     private const int MaxGoalChars = 120;
     private const int MaxReasonChars = 160;
 
+    private static readonly JsonSerializerOptions WriteOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     public static List<AgentTaskOutcome> Parse(string? json)
     {
-        if (string.IsNullOrWhiteSpace(json)) return [];
+        var result = new List<AgentTaskOutcome>();
+        if (string.IsNullOrWhiteSpace(json)) return result;
         try
         {
-            var items = JsonSerializer.Deserialize<List<AgentTaskOutcome>>(json);
-            return items?.Where(i => !string.IsNullOrWhiteSpace(i.Goal)).TakeLast(MaxStored).ToList() ?? [];
+            var items = JsonSerializer.Deserialize<List<AgentTaskOutcome?>>(json);
+            if (items == null) return result;
+            foreach (var item in items)
+                if (item is not null && !string.IsNullOrWhiteSpace(item.Goal))
+                    Add(result, item.Goal, item.Outcome, item.Reason);
+            return result;
         }
         catch (JsonException)
         {
@@ -32,13 +40,19 @@ public static class AgentTaskOutcomeMemory
         }
     }
 
-    public static string Serialize(IReadOnlyList<AgentTaskOutcome> items) => JsonSerializer.Serialize(items);
+    public static string Serialize(IReadOnlyList<AgentTaskOutcome> items) => JsonSerializer.Serialize(items, WriteOptions);
 
-    public static void Add(List<AgentTaskOutcome> items, string goal, string outcome, string? reason)
+    public static void Add(List<AgentTaskOutcome> items, string goal, string? outcome, string? reason)
     {
-        items.Add(new AgentTaskOutcome(Clip(goal, MaxGoalChars), outcome, Clip(reason ?? string.Empty, MaxReasonChars)));
+        items.Add(new AgentTaskOutcome(Clip(goal, MaxGoalChars), Known(outcome), Clip(reason ?? string.Empty, MaxReasonChars)));
         if (items.Count > MaxStored) items.RemoveRange(0, items.Count - MaxStored);
     }
+
+    private static string Known(string? outcome) => outcome switch
+    {
+        Done or Blocked or Stopped or Error => outcome,
+        _ => Error
+    };
 
     public static string Block(IReadOnlyList<AgentTaskOutcome> items)
     {
@@ -51,6 +65,8 @@ public static class AgentTaskOutcomeMemory
     private static string Clip(string text, int max)
     {
         var single = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return single.Length > max ? single[..max] : single;
+        if (single.Length <= max) return single;
+        var cut = char.IsHighSurrogate(single[max - 1]) ? max - 1 : max;
+        return single[..cut];
     }
 }

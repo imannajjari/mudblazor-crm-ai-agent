@@ -50,6 +50,26 @@ public class AgentTaskOutcomeMemoryTests
         Assert.Equal(items[0], parsed[0]);
     }
 
+    [Fact]
+    public void Parse_HostileEntriesAreNormalized()
+    {
+        var parsed = AgentTaskOutcomeMemory.Parse("""[null,{"Goal":"a\nb","Outcome":"weird","Reason":null},{"Goal":"  "}]""");
+
+        var only = Assert.Single(parsed);
+        Assert.Equal("a b", only.Goal);
+        Assert.Equal(AgentTaskOutcomeMemory.Error, only.Outcome);
+        Assert.Equal(string.Empty, only.Reason);
+    }
+
+    [Fact]
+    public void Add_DoesNotSplitSurrogatePairWhenClipping()
+    {
+        var items = new List<AgentTaskOutcome>();
+        AgentTaskOutcomeMemory.Add(items, new string('a', 119) + "😀", AgentTaskOutcomeMemory.Done, string.Empty);
+
+        Assert.Equal(new string('a', 119), items[0].Goal);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

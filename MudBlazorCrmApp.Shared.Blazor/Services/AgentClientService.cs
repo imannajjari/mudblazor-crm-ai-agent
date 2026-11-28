@@ -319,7 +319,7 @@ public sealed class AgentClientService(
             messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, taskPrompt, snapshotJson);
             lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             run.Close(AgentTaskOutcomeMemory.Stopped);
             if (run.ChatKey == CurrentChatKey) _entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
@@ -327,7 +327,7 @@ public sealed class AgentClientService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Agent task execution failed.");
-            run.Close(AgentTaskOutcomeMemory.Error, ex.Message);
+            run.Close(AgentTaskOutcomeMemory.Error, "task failed");
             if (run.ChatKey == CurrentChatKey) _entries.Add(new AgentChatEntry("error", ex.Message));
         }
         finally
@@ -381,7 +381,7 @@ public sealed class AgentClientService(
             if (!string.IsNullOrWhiteSpace(stepRes.Error))
             {
                 _entries.Add(new AgentChatEntry("error", stepRes.Error));
-                run.Close(AgentTaskOutcomeMemory.Error, stepRes.Error);
+                run.Close(AgentTaskOutcomeMemory.Error, "agent error");
                 return string.Empty;
             }
             if (string.IsNullOrWhiteSpace(stepRes.Assistant))
@@ -406,6 +406,7 @@ public sealed class AgentClientService(
                 return string.Empty;
             }
 
+            var unsavedAfterRetries = false;
             if (toolCalls.Count == 0)
             {
                 if (string.IsNullOrWhiteSpace(textReply))
@@ -428,9 +429,11 @@ public sealed class AgentClientService(
                         messages.Add(AgentClientTranscriptHelper.SerializeFinishBlockedNudge(unsavedErr));
                         continue;
                     }
+                    unsavedAfterRetries = unsavedErr != null;
                 }
                 var summaryText = string.IsNullOrWhiteSpace(textReply) ? appText["AGENT_EMPTY_REPLY"] : textReply;
                 if (string.IsNullOrWhiteSpace(textReply)) run.Close(AgentTaskOutcomeMemory.Blocked, "empty reply");
+                else if (unsavedAfterRetries) run.Close(AgentTaskOutcomeMemory.Blocked, "unsaved changes");
                 else run.Close(AgentTaskOutcomeMemory.Done);
                 var summary = AgentClientTranscriptHelper.AppendLedger(summaryText, ledger, appText["AGENT_ACTIONS_DONE"]);
                 _entries.Add(new AgentChatEntry("assistant", summary));
