@@ -406,3 +406,5 @@ check.cs
 _typecheck/
 test-*.ps1
 
+
+e2e/test-results/
