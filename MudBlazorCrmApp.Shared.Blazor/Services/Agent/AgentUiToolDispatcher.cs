@@ -242,7 +242,9 @@ public sealed class AgentUiToolDispatcher(
             }
         }
         catch (JsonException ex) { logger.LogDebug(ex, "Failed to look up action {ActionId}.", id); }
-        return (id, "save");
+        // An id the model never saw in a snapshot is a guess: classify it as the strictest risk so the
+        // destructive gate (target must be on screen, delete prerequisites) applies, never as a plain save.
+        return (id, "destructive");
     }
 
     public string LookupFieldLabel(string snapshotJson, string id)

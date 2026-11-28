@@ -37,8 +37,6 @@ window.crmAgentDriver = (function () {
 
     // Semantic ids: derived from what the user sees, so a re-render keeps the same id for the
     // same control instead of shifting every positional f1/a1 after it.
-    let lastMaxRows = 15;
-
     function slugify(text, max) {
         const s = cleanText(text).replace(/\u200c/g, '').toLowerCase()
             .replace(/[^\p{L}\p{N}]+/gu, '_')
@@ -53,14 +51,11 @@ window.crmAgentDriver = (function () {
         return id;
     }
 
-    // Looks an element up by id; on a miss re-scans the screen once (ids are semantic, so the
-    // same control is found again after a re-render) and retries before giving up.
+    // The map is rebuilt by every snapshot, so an id in it is the one the model was shown. An id
+    // that is missing or detached is not re-scanned into a different live element (a stale dialog
+    // "Delete" must never land on the page behind it): the caller reports it and the model re-scans.
     function resolveElement(id) {
-        let el = elementMap.get(id);
-        if (!el || !document.contains(el)) {
-            captureSnapshot(lastMaxRows);
-            el = elementMap.get(id);
-        }
+        const el = elementMap.get(id);
         return el && document.contains(el) ? el : null;
     }
 
@@ -105,7 +100,6 @@ window.crmAgentDriver = (function () {
     function captureSnapshot(maxRowsParam) {
         elementMap.clear();
         const maxRows = Math.min(50, Math.max(1, Number(maxRowsParam) || 15));
-        lastMaxRows = maxRows;
         const used = new Set();
         const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
         const topDialog = dialogs.length > 0 ? dialogs[dialogs.length - 1] : null;
@@ -114,7 +108,7 @@ window.crmAgentDriver = (function () {
         const headingEl = (topDialog ? topDialog.querySelector('.mud-dialog-title') : null)
             || root.querySelector('h1, h2, h3, .mud-typography-h3, .mud-typography-h4');
 
-        const tabs = collectTabs(root, used);
+        const tabs = collectTabs(root, used, new Map());
 
         // Fields (inputs, selects, autocompletes, date pickers)
         const fields = [];
@@ -125,8 +119,8 @@ window.crmAgentDriver = (function () {
             if (!input) return;
             const labelEl = ctrl.querySelector('label.mud-input-label');
             const label = cleanText(labelEl ? labelEl.innerText : (input.getAttribute('placeholder') || input.getAttribute('aria-label') || ''));
-            const fallback = 'field_' + (fieldIdx++);
-            const id = claimId(slugify(input.getAttribute('name') || '') || slugify(label) || fallback, used);
+            const fallback = () => 'field_' + (fieldIdx++);
+            const id = claimId(slugify(input.getAttribute('name') || '') || slugify(label) || fallback(), used);
             const isSelect = !!ctrl.closest('.mud-select');
             const isAuto = !!ctrl.closest('.mud-autocomplete');
             const isDate = !!ctrl.closest('.mud-picker');
@@ -152,8 +146,8 @@ window.crmAgentDriver = (function () {
             const input = ctrl.querySelector('input[type="checkbox"]');
             if (!input) return;
             const label = cleanText(ctrl.innerText || input.getAttribute('aria-label') || '');
-            const fallback = 'field_' + (fieldIdx++);
-            const id = claimId(slugify(input.getAttribute('name') || '') || slugify(label) || fallback, used);
+            const fallback = () => 'field_' + (fieldIdx++);
+            const id = claimId(slugify(input.getAttribute('name') || '') || slugify(label) || fallback(), used);
             elementMap.set(id, input);
             fields.push({
                 id,
@@ -737,12 +731,12 @@ window.crmAgentDriver = (function () {
         return JSON.stringify({ ok: items.length > 0, items });
     }
 
-    function collectTabs(root, used) {
+    function collectTabs(root, used, knownIds) {
         const tabs = [];
         root.querySelectorAll('.mud-tab').forEach(el => {
             if (!isVisible(el)) return;
             const title = cleanText(el.innerText);
-            const id = claimId('tab_' + (slugify(title) || 'tab'), used);
+            const id = knownIds.get(el) || claimId('tab_' + (slugify(title) || 'tab'), used);
             elementMap.set(id, el);
             tabs.push({
                 id,
@@ -756,7 +750,8 @@ window.crmAgentDriver = (function () {
     }
 
     function scanTabs() {
-        const tabs = collectTabs(getActiveRoot(), new Set(elementMap.keys()));
+        const knownIds = new Map([...elementMap].map(([id, el]) => [el, id]));
+        const tabs = collectTabs(getActiveRoot(), new Set(elementMap.keys()), knownIds);
         return JSON.stringify({ ok: true, tabs });
     }
 

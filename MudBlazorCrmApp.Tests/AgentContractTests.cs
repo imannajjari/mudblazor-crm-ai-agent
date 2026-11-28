@@ -224,6 +224,29 @@ public class AgentContractTests
         Assert.False(await db.AgentChat.AnyAsync(c => c.ChatKey == "chat_1"));
     }
 
+    [Fact]
+    public void LookupAction_UnseenId_IsClassifiedDestructive_NotSave()
+    {
+        var services = new ServiceCollection();
+        services.AddBlazorServices("https://localhost/");
+        services.AddLogging();
+        services.AddScoped<IJSRuntime, StubJsRuntime>();
+        services.AddScoped<NavigationManager, StubNavManager>();
+        services.AddScoped<IAccessTokenProvider, StubAccessTokenProvider>();
+
+        using var sp = services.BuildServiceProvider();
+        var dispatcher = sp.GetRequiredService<AgentUiToolDispatcher>();
+        const string snapshot = """{"actions":[{"id":"btn_save","text":"Save","risk":"save"}]}""";
+
+        var seen = dispatcher.LookupAction(snapshot, "btn_save");
+        Assert.Equal("save", seen.Risk);
+
+        // A guessed id (e.g. a Delete button the model never saw) must not fall back to "save",
+        // which would skip the destructive gate in Auto mode.
+        var guessed = dispatcher.LookupAction(snapshot, "btn_حذف");
+        Assert.Equal("destructive", guessed.Risk);
+    }
+
     private sealed class CountingReadDataTool : IServerToolHandler
     {
         public string Name => "read_data";
