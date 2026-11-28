@@ -89,6 +89,7 @@ public class AgentPhase5GuardTests
         Assert.False(safety.IsUserQuote("TBDX"));
         safety.SetUserEvidence("TBDX چیزی نیست");
         Assert.False(safety.IsUserQuote("TBD"));
+        Assert.True(safety.IsUserQuote("TBDX"));
 
         safety.Reset();
         Assert.False(safety.IsUserQuote("TBD"));
