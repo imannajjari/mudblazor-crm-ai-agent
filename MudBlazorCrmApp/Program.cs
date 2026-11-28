@@ -334,7 +334,20 @@ using (var scope = app.Services.CreateScope())
         };
 
         await userManager.CreateAsync(normalUser, "testUser123!");
-        
+
+        ApplicationUser imanUser = new()
+        {
+            Email = "iman@example.com",
+            UserName = "iman",
+            FirstName = "Iman",
+            LastName = "User",
+            Title = "Administrator",
+            CompanyName = "Admin Corp",
+            Photo = photo,
+        };
+
+        await userManager.CreateAsync(imanUser, "iman");
+        await userManager.AddToRoleAsync(imanUser, "Administrator");
 
         if (File.Exists("Address.Data.json"))
         {
