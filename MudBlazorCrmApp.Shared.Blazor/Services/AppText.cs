@@ -126,7 +126,7 @@ public class AppText
         ["AGENT_MODE_SEMIAUTO_HINT"] = ("فقط عملیات پرخطر را می‌پرسد.", "Only asks for risky actions."),
         ["AGENT_MODE_AUTO_HINT"] = ("بدون پرسش کار می‌کند؛ حذف را خودش انجام نمی‌دهد.", "Works without asking; it will not delete on its own."),
         ["AGENT_CLEAR_ALWAYS_ALLOW_CHOICES"] = ("پاک کردن مجوزهای «همیشه»", "Clear always-allow choices"),
-        ["AGENT_TASK"] = ("شما درخواست کردید", "You asked"),
+        ["AGENT_TASK"] = ("درخواست", "Task"),
         ["AGENT_YOU"] = ("شما", "You"),
         ["AGENT_ASKS"] = ("ایجنت می‌پرسد", "Agent asks"),
         ["AGENT_RESULT"] = ("نتیجه", "Result"),
