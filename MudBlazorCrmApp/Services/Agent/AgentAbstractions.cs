@@ -49,6 +49,7 @@ public sealed class AgentUsageCounter
         Total.InputTokens += Math.Max(0, add.InputTokens);
         Total.OutputTokens += Math.Max(0, add.OutputTokens);
         Total.CachedInputTokens += Math.Max(0, add.CachedInputTokens);
+        Total.CacheWriteInputTokens += Math.Max(0, add.CacheWriteInputTokens);
         Total.Calls += Math.Max(0, add.Calls);
         if (add.Cost.HasValue)
         {
@@ -109,9 +110,11 @@ public static class AgentCostCalculator
         var safeInput = Math.Max(0, usage.InputTokens);
         var safeOutput = Math.Max(0, usage.OutputTokens);
         var clampedCached = Math.Clamp(usage.CachedInputTokens, 0, safeInput);
-        var uncachedInput = safeInput - clampedCached;
+        var clampedWrite = Math.Clamp(usage.CacheWriteInputTokens, 0, safeInput - clampedCached);
+        var uncachedInput = safeInput - clampedCached - clampedWrite;
 
         var inputCost = (uncachedInput * rates.InputPerMillion
+                         + clampedWrite * rates.EffectiveCacheWritePerMillion
                          + clampedCached * rates.CachedInputPerMillion) / TokensPerMillion;
         var outputCost = safeOutput * rates.OutputPerMillion / TokensPerMillion;
         usage.Cost = Math.Round(inputCost + outputCost, 6);
@@ -122,6 +125,7 @@ public static class AgentCostCalculator
         total.InputTokens += Math.Max(0, add.InputTokens);
         total.OutputTokens += Math.Max(0, add.OutputTokens);
         total.CachedInputTokens += Math.Max(0, add.CachedInputTokens);
+        total.CacheWriteInputTokens += Math.Max(0, add.CacheWriteInputTokens);
         total.Calls += Math.Max(0, add.Calls);
         if (add.Cost.HasValue)
             total.Cost = (total.Cost ?? 0m) + add.Cost.Value;

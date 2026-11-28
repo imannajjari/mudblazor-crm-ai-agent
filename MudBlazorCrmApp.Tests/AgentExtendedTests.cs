@@ -740,6 +740,79 @@ public class AgentExtendedTests
     }
 
     [Fact]
+    public async Task Wave4_AnthropicProvider_MarksThreeCacheBreakpointsAndCountsWriteTokens()
+    {
+        string? seenBody = null;
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            seenBody = req.Content?.ReadAsStringAsync().Result;
+            const string json = """
+                {
+                  "content": [ { "type": "text", "text": "Done." } ],
+                  "usage": { "input_tokens": 100, "output_tokens": 20, "cache_creation_input_tokens": 500, "cache_read_input_tokens": 800 }
+                }
+                """;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        });
+
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.anthropic.com/v1/") };
+        var opts = Options.Create(new AgentOptions { Provider = "Anthropic", ApiKey = "sk-ant-test", Model = "claude-sonnet-4" });
+        var provider = new AnthropicAgentLlmProvider(client, opts, NullLogger<AnthropicAgentLlmProvider>.Instance);
+
+        var messages = new List<JsonObject>
+        {
+            new() { ["role"] = "system", ["content"] = "System instructions" },
+            new() { ["role"] = "user", ["content"] = "List customers" }
+        };
+        var tools = AgentToolSchemas.GetTools();
+        var result = await provider.CompleteAsync(messages, [tools[0], tools[1]], null, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        using var payload = JsonDocument.Parse(seenBody!);
+
+        static bool IsEphemeral(JsonElement node) =>
+            node.TryGetProperty("cache_control", out var cc) &&
+            cc.GetProperty("type").GetString() == "ephemeral";
+
+        var systemBlock = payload.RootElement.GetProperty("system").EnumerateArray().First();
+        Assert.True(IsEphemeral(systemBlock));
+
+        var toolList = payload.RootElement.GetProperty("tools").EnumerateArray().ToList();
+        Assert.Equal(2, toolList.Count);
+        Assert.False(IsEphemeral(toolList[0]));
+        Assert.True(IsEphemeral(toolList[^1]));
+
+        var lastMsgBlocks = payload.RootElement.GetProperty("messages").EnumerateArray().ToList()[^1]
+            .GetProperty("content").EnumerateArray().ToList();
+        Assert.True(IsEphemeral(lastMsgBlocks[^1]));
+
+        Assert.Equal(500, result.Usage.CacheWriteInputTokens);
+        Assert.Equal(800, result.Usage.CachedInputTokens);
+        Assert.Equal(1400, result.Usage.InputTokens);
+        Assert.Equal(20, result.Usage.OutputTokens);
+    }
+
+    [Fact]
+    public void Wave4_CostCalculator_PricesCacheWriteAndReadAtSeparateRates()
+    {
+        var usage = new AgentUsageModel
+        {
+            Calls = 1,
+            InputTokens = 1000,
+            CachedInputTokens = 400,
+            CacheWriteInputTokens = 300,
+            OutputTokens = 100
+        };
+        AgentCostCalculator.Compute(usage, new AgentOptions { Model = "claude-sonnet-4" });
+        // 300 uncached*3 + 300 write*3.75 + 400 cached*0.30 + 100 output*15 = 3645 per million
+        Assert.Equal(0.003645m, usage.Cost);
+
+        var local = new AgentUsageModel { Calls = 1, InputTokens = 1000, CacheWriteInputTokens = 1000 };
+        AgentCostCalculator.Compute(local, new AgentOptions { Model = "custom-local-model", InputPricePerMillionTokensUsd = 0.25m, OutputPricePerMillionTokensUsd = 0.75m });
+        Assert.Equal(0.00025m, local.Cost);
+    }
+
+    [Fact]
     public async Task Wave3_ChartService_Tool_And_WidgetParser_RoundTrip()
     {
         var tool = new AgentChartServerTool();

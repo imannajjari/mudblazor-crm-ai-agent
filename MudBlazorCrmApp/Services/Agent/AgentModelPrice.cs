@@ -5,16 +5,27 @@ namespace MudBlazorCrmApp.Services.Agent;
 /// </summary>
 public static class AgentModelPrice
 {
-    public sealed record ModelRates(decimal InputPerMillion, decimal OutputPerMillion, decimal CachedInputPerMillion);
+    /// <summary>
+    /// CacheWritePerMillion prices Anthropic's cache_creation_input_tokens (1.25x input for
+    /// the 5-minute ephemeral cache); -1 means "no separate cache write fee, bill at input rate".
+    /// </summary>
+    public sealed record ModelRates(
+        decimal InputPerMillion,
+        decimal OutputPerMillion,
+        decimal CachedInputPerMillion,
+        decimal CacheWritePerMillion = -1m)
+    {
+        public decimal EffectiveCacheWritePerMillion => CacheWritePerMillion >= 0m ? CacheWritePerMillion : InputPerMillion;
+    }
 
     private static readonly (string Prefix, ModelRates Rates)[] KnownModels =
     [
-        ("claude-sonnet-4", new(3.00m, 15.00m, 0.30m)),
-        ("claude-3-7-sonnet", new(3.00m, 15.00m, 0.30m)),
-        ("claude-3-5-sonnet", new(3.00m, 15.00m, 0.30m)),
-        ("claude-3-5-haiku", new(0.80m, 4.00m, 0.08m)),
-        ("claude-haiku-4", new(0.80m, 4.00m, 0.08m)),
-        ("claude-opus-4", new(15.00m, 75.00m, 1.50m)),
+        ("claude-sonnet-4", new(3.00m, 15.00m, 0.30m, 3.75m)),
+        ("claude-3-7-sonnet", new(3.00m, 15.00m, 0.30m, 3.75m)),
+        ("claude-3-5-sonnet", new(3.00m, 15.00m, 0.30m, 3.75m)),
+        ("claude-3-5-haiku", new(0.80m, 4.00m, 0.08m, 1.00m)),
+        ("claude-haiku-4", new(0.80m, 4.00m, 0.08m, 1.00m)),
+        ("claude-opus-4", new(15.00m, 75.00m, 1.50m, 18.75m)),
         ("gpt-4o-mini", new(0.15m, 0.60m, 0.075m)),
         ("gpt-4o", new(2.50m, 10.00m, 1.25m)),
         ("gpt-4.1-mini", new(0.40m, 1.60m, 0.10m)),

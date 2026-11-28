@@ -25,6 +25,8 @@ public class AgentUsageModel
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
     public int CachedInputTokens { get; set; }
+    /// <summary>Prompt tokens written to a provider cache (Anthropic cache_creation); included in InputTokens.</summary>
+    public int CacheWriteInputTokens { get; set; }
     public int Calls { get; set; }
     public decimal? Cost { get; set; }
 }

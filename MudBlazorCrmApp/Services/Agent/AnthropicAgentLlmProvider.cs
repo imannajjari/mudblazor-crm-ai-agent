@@ -8,6 +8,7 @@ namespace MudBlazorCrmApp.Services.Agent;
 /// <summary>
 /// Anthropic Messages API (/v1/messages) implementation of <see cref="IAgentLlmProvider"/>.
 /// Normalizes responses and tool calls to the canonical OpenAI-style transcript JSON expected by AgentService.
+/// Request payloads (including prompt-caching breakpoints) are built by <see cref="AnthropicAgentRequestBuilder"/>.
 /// </summary>
 public sealed class AnthropicAgentLlmProvider(
     HttpClient httpClient,
@@ -34,18 +35,7 @@ public sealed class AnthropicAgentLlmProvider(
             return new LlmCallResult(null, new AgentUsageModel(), "Agent API key is not configured on the server.");
 
         var model = string.IsNullOrWhiteSpace(modelOverride) ? options.Model : modelOverride.Trim();
-        var (systemText, convertedMessages) = ConvertMessages(messages);
-        var payload = new JsonObject
-        {
-            ["model"] = model,
-            ["max_tokens"] = options.MaxTokens,
-            ["temperature"] = 0.2,
-            ["messages"] = convertedMessages
-        };
-        if (!string.IsNullOrWhiteSpace(systemText))
-            payload["system"] = systemText;
-        if (tools is { Length: > 0 })
-            payload["tools"] = ConvertTools(tools);
+        var payload = AnthropicAgentRequestBuilder.BuildPayload(model, options.MaxTokens, messages, tools);
 
         var payloadJson = payload.ToJsonString();
         HttpRequestMessage CreateRequest()
@@ -77,142 +67,6 @@ public sealed class AnthropicAgentLlmProvider(
         }
     }
 
-    private static (string SystemText, JsonArray Messages) ConvertMessages(IReadOnlyList<JsonObject> messages)
-    {
-        var sysParts = new List<string>();
-        var list = new JsonArray();
-        foreach (var msg in messages)
-        {
-            var role = TryGetString(msg["role"]) ?? "user";
-            if (role == "system")
-            {
-                var txt = TryGetString(msg["content"]);
-                if (!string.IsNullOrWhiteSpace(txt)) sysParts.Add(txt);
-                continue;
-            }
-            if (role == "tool")
-            {
-                AppendUserTurn(list, new JsonObject
-                {
-                    ["type"] = "tool_result",
-                    ["tool_use_id"] = TryGetString(msg["tool_call_id"]) ?? "",
-                    ["content"] = TryGetString(msg["content"]) ?? ""
-                });
-                continue;
-            }
-            if (role == "assistant" && msg["tool_calls"] is JsonArray tcs)
-            {
-                list.Add(new JsonObject { ["role"] = "assistant", ["content"] = ConvertAssistantToolCalls(msg, tcs) });
-                continue;
-            }
-            if (role == "assistant")
-                list.Add(new JsonObject { ["role"] = "assistant", ["content"] = ConvertUserContent(msg["content"]) });
-            else
-                AppendUserTurn(list, ConvertUserContent(msg["content"]));
-        }
-        return (string.Join("\n\n", sysParts), list);
-    }
-
-    private static JsonArray ConvertAssistantToolCalls(JsonObject msg, JsonArray tcs)
-    {
-        var blocks = new JsonArray();
-        var text = TryGetString(msg["content"]);
-        if (!string.IsNullOrWhiteSpace(text))
-            blocks.Add(new JsonObject { ["type"] = "text", ["text"] = text });
-        foreach (var tc in tcs)
-        {
-            var fn = TryGetString(tc?["function"]?["name"]) ?? "";
-            var argsStr = TryGetString(tc?["function"]?["arguments"]) ?? "{}";
-            JsonNode? parsedInput;
-            try { parsedInput = JsonNode.Parse(argsStr); }
-            catch (JsonException) { parsedInput = new JsonObject(); }
-            blocks.Add(new JsonObject
-            {
-                ["type"] = "tool_use",
-                ["id"] = TryGetString(tc?["id"]) ?? Guid.NewGuid().ToString("N"),
-                ["name"] = fn,
-                ["input"] = parsedInput ?? new JsonObject()
-            });
-        }
-        return blocks;
-    }
-
-    private static void AppendUserTurn(JsonArray list, JsonNode contentNode)
-    {
-        var blocks = contentNode is JsonArray arr
-            ? arr
-            : contentNode is JsonObject obj && obj["type"] != null
-                ? new JsonArray(obj.DeepClone())
-                : new JsonArray(new JsonObject { ["type"] = "text", ["text"] = TryGetString(contentNode) ?? "" });
-
-        if (list.Count > 0 && list[^1] is JsonObject prev && TryGetString(prev["role"]) == "user")
-        {
-            if (prev["content"] is not JsonArray prevArr)
-            {
-                var prevText = TryGetString(prev["content"]) ?? "";
-                prevArr = string.IsNullOrEmpty(prevText)
-                    ? []
-                    : [new JsonObject { ["type"] = "text", ["text"] = prevText }];
-                prev["content"] = prevArr;
-            }
-            foreach (var b in blocks)
-                if (b != null) prevArr.Add(b.DeepClone());
-            return;
-        }
-        list.Add(new JsonObject { ["role"] = "user", ["content"] = blocks.DeepClone() });
-    }
-
-    private static JsonNode ConvertUserContent(JsonNode? content)
-    {
-        if (content is not JsonArray arr) return content?.DeepClone() ?? JsonValue.Create("")!;
-        var blocks = new JsonArray();
-        foreach (var item in arr)
-        {
-            if (TryGetString(item?["type"]) == "image_url")
-            {
-                var url = TryGetString(item?["image_url"]?["url"]) ?? "";
-                var commaIdx = url.IndexOf(',');
-                if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && commaIdx > 5)
-                {
-                    var header = url[5..commaIdx];
-                    var semiIdx = header.IndexOf(';');
-                    var mediaType = semiIdx > 0 ? header[..semiIdx] : "image/png";
-                    blocks.Add(new JsonObject
-                    {
-                        ["type"] = "image",
-                        ["source"] = new JsonObject { ["type"] = "base64", ["media_type"] = mediaType, ["data"] = url[(commaIdx + 1)..] }
-                    });
-                }
-            }
-            else if (item != null)
-            {
-                blocks.Add(item.DeepClone());
-            }
-        }
-        if (blocks.Count == 0)
-            blocks.Add(new JsonObject { ["type"] = "text", ["text"] = "" });
-        return blocks;
-    }
-
-    private static string? TryGetString(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
-
-    private static JsonArray ConvertTools(JsonElement[] tools)
-    {
-        var arr = new JsonArray();
-        foreach (var t in tools)
-        {
-            if (!t.TryGetProperty("function", out var fn)) continue;
-            arr.Add(new JsonObject
-            {
-                ["name"] = fn.GetProperty("name").GetString(),
-                ["description"] = fn.TryGetProperty("description", out var d) ? d.GetString() : "",
-                ["input_schema"] = fn.TryGetProperty("parameters", out var p) ? JsonNode.Parse(p.GetRawText()) : new JsonObject()
-            });
-        }
-        return arr;
-    }
-
     private static LlmCallResult ParseAnthropicResponse(string body, int maxTokens, ILogger logger)
     {
         using var doc = JsonDocument.Parse(body);
@@ -224,6 +78,7 @@ public sealed class AnthropicAgentLlmProvider(
             var cacheRead = u.TryGetProperty("cache_read_input_tokens", out var ct) && ct.TryGetInt32(out var cv) ? cv : 0;
             var cacheWrite = u.TryGetProperty("cache_creation_input_tokens", out var cw) && cw.TryGetInt32(out var cwv) ? cwv : 0;
             usage.CachedInputTokens = cacheRead;
+            usage.CacheWriteInputTokens = cacheWrite;
             usage.InputTokens = baseIn + cacheRead + cacheWrite;
             if (u.TryGetProperty("output_tokens", out var ot) && ot.TryGetInt32(out var ov)) usage.OutputTokens = ov;
         }
