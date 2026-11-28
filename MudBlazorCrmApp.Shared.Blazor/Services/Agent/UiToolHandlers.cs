@@ -136,8 +136,8 @@ public sealed class SetFieldHandler : IUiToolHandler
         if (AgentSafetyState.IsFileLikeFieldValue(val))
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "File paths or raw binary values are not allowed in text fields. Use upload_file_to_screen." }), false, null, ctx.CurrentSnapshotJson);
 
-        if (!AgentSafetyState.IsProvidedValue(val) && !string.Equals(delegatedBy, "user", StringComparison.OrdinalIgnoreCase))
-            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder or empty value '{val}' is not allowed. Ask the user if missing." }), false, null, ctx.CurrentSnapshotJson);
+        if (!AgentSafetyState.IsProvidedValue(val) && !ctx.Safety.IsUserQuote(delegatedBy))
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder or empty value '{val}' is not allowed. delegatedBy must quote the user's own words from the task goal or their ask_user answers (the bare word 'user' is not evidence)." }), false, null, ctx.CurrentSnapshotJson);
 
         var isSensitive = AgentSafetyState.IsSensitiveField(ctx.CurrentSnapshotJson, id);
         var res = await ctx.Host.InvokeDriverStringAsync("setField", ct, id, val);
@@ -494,6 +494,18 @@ public sealed class FinishHandler : IUiToolHandler
         var summary = UiToolArgs.GetString(args, "summary");
         if (string.IsNullOrWhiteSpace(summary))
             return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "Non-empty summary is required for finish." }), false, null, ctx.CurrentSnapshotJson));
+
+        if (AgentLoopGuards.AdvisesModeSwitch(summary))
+        {
+            if (!ctx.Safety.AutoAdviceNudged)
+            {
+                ctx.Safety.MarkAutoAdviceNudged();
+                return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "Do not tell the user to switch agent modes in the finish summary. Rewrite it describing what you completed or found." }), false, null, ctx.CurrentSnapshotJson));
+            }
+            summary = AgentLoopGuards.StripModeAdvice(summary);
+            if (string.IsNullOrWhiteSpace(summary))
+                return Task.FromResult(new UiToolResult(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = "Write a finish summary of the work done, without mode-switch advice." }), false, null, ctx.CurrentSnapshotJson));
+        }
 
         var unsavedErr = ctx.Safety.CheckFinishOrNavAllowed();
         if (unsavedErr != null)

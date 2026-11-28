@@ -25,13 +25,30 @@ public sealed partial class AgentSafetyState
     public bool DeleteRefused { get; private set; }
     public bool HasAttachmentsInTask { get; set; }
     public bool HasAskedFileSaveConfirm { get; private set; }
+    public bool AutoAdviceNudged { get; private set; }
     public string? SelectedRecordHint { get; set; }
+    private string _userEvidence = string.Empty;
 
     public void MarkDirty() => HasUnsavedChanges = true;
     public void MarkSaved() => HasUnsavedChanges = false;
     public void MarkRead() => HasReadBeforeDelete = true;
     public void MarkDeleteRefused() => DeleteRefused = true;
     public void MarkFileSaveConfirmed() => HasAskedFileSaveConfirm = true;
+    public void MarkAutoAdviceNudged() => AutoAdviceNudged = true;
+
+    public void SetUserEvidence(string? evidence) => _userEvidence = CollapseWhitespace(evidence ?? string.Empty);
+    public void AppendUserEvidence(string? text) =>
+        _userEvidence = CollapseWhitespace(_userEvidence + "\n" + (text ?? string.Empty));
+
+    /// <summary>True when the text appears verbatim in the goal or the user's ask_user answers of this task.</summary>
+    public bool IsUserQuote(string? text)
+    {
+        var quote = CollapseWhitespace(text ?? string.Empty);
+        return quote.Length >= 3 && _userEvidence.Contains(quote, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CollapseWhitespace(string s) =>
+        string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     public void Reset()
     {
@@ -41,7 +58,9 @@ public sealed partial class AgentSafetyState
         DeleteRefused = false;
         HasAttachmentsInTask = false;
         HasAskedFileSaveConfirm = false;
+        AutoAdviceNudged = false;
         SelectedRecordHint = null;
+        _userEvidence = string.Empty;
     }
 
     public static bool IsProvidedValue(string? value)

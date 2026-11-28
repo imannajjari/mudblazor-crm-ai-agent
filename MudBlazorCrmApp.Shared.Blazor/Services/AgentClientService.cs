@@ -60,6 +60,9 @@ public sealed class AgentClientService(
     public int TotalOutputTokens { get; private set; }
     public decimal TotalCost { get; private set; }
     public bool ShowCost { get; private set; } = true;
+    public bool AttachmentsEnabled { get; private set; } = true;
+    private IReadOnlyList<string> _lastStepTimings = [];
+    public IReadOnlyList<string> LastStepTimings => _lastStepTimings;
     public bool HasAlwaysAllowed => permissionGate.HasAlwaysAllowed;
     public void ClearAlwaysAllowed()
     {
@@ -95,6 +98,7 @@ public sealed class AgentClientService(
             if (res.MaxTaskModelCalls > 0) MaxTaskModelCalls = res.MaxTaskModelCalls;
             if (res.MaxTaskCostUsd > 0) MaxTaskCostUsd = res.MaxTaskCostUsd;
             ShowCost = res.ShowCost;
+            AttachmentsEnabled = res.AttachmentsEnabled;
             toolDispatcher.IsVisionEnabled = res.Vision;
             return res.UseAgent;
         }
@@ -132,7 +136,25 @@ public sealed class AgentClientService(
         TotalInputTokens = detail.TotalInputTokens;
         TotalOutputTokens = detail.TotalOutputTokens;
         TotalCost = detail.TotalCost;
+        _lastStepTimings = [];
         NotifyChanged();
+        await RestoreChatAttachmentsAsync(detail.ChatKey);
+    }
+
+    private async Task RestoreChatAttachmentsAsync(string chatKey)
+    {
+        if (!AttachmentsEnabled) return;
+        try
+        {
+            var items = await _stepApi.ListChatAttachmentsAsync(chatKey, CancellationToken.None);
+            if (items.Count == 0 || chatKey != CurrentChatKey) return;
+            _attachedFiles.AddRange(items.Where(i => _attachedFiles.All(f => f.Id != i.Id)));
+            NotifyChanged();
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Restoring attachments of chat {ChatKey} failed.", chatKey);
+        }
     }
 
     public async Task DeleteChatAsync(string chatKey)
@@ -302,13 +324,16 @@ public sealed class AgentClientService(
 
         var messages = new List<string>();
         var lastSummary = string.Empty;
+        var tracker = new AgentTaskRepeatTracker();
         try
         {
             var isDeleteGoal = AgentLoopGuards.IsDeleteTaskGoal(goal);
             var adviceOnlyGoal = AgentLoopGuards.IsReadOnlyAdviceGoal(goal);
             var activeFiles = AttachedFiles.Where(f => f.Error == null && f.ExpiresUtc > DateTime.UtcNow).ToList();
             toolDispatcher.ResetSafety(isDeleteGoal, activeFiles.Count > 0, adviceOnlyGoal);
+            toolDispatcher.SetUserEvidence(goal);
             var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
+            tracker.NoteFingerprint(AgentTaskRepeatTracker.ExtractFingerprint(snapshotJson));
             var goalPrefix = isDeleteGoal ? "[Delete task: yes]\n" : string.Empty;
             // The outcomes block follows the goal line, so server guards that read the first line are unaffected.
             var outcomeBlock = AgentTaskOutcomeMemory.Block(_recentOutcomes);
@@ -317,7 +342,7 @@ public sealed class AgentClientService(
                 ? goalText
                 : string.Join("\n", activeFiles.Select(f => $"[att:{f.Id} \"{f.FileName}\", {f.Kind}]")) + "\n" + goalText;
             messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, taskPrompt, snapshotJson);
-            lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, ct);
+            lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, tracker, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -332,12 +357,16 @@ public sealed class AgentClientService(
         }
         finally
         {
+            // A task that cleared grid filters must leave them as the user had them, on every exit path.
+            if (tracker.FiltersCleared)
+                await toolDispatcher.RestoreFiltersAfterTaskAsync(CancellationToken.None);
             await PersistCompletedTaskAsync(run, goal, lastSummary, messages);
         }
     }
 
     private async Task<string> ExecuteStepLoopAsync(
-        TaskRunState run, List<string> messages, List<string> ledger, string snapshotJson, CancellationToken ct)
+        TaskRunState run, List<string> messages, List<string> ledger, string snapshotJson,
+        AgentTaskRepeatTracker tracker, CancellationToken ct)
     {
         var emptyRetries = 0;
         var finishRetries = 0;
@@ -377,6 +406,7 @@ public sealed class AgentClientService(
             if (stepRes.MaxTaskCostUsd is > 0) MaxTaskCostUsd = stepRes.MaxTaskCostUsd.Value;
             if (stepRes.MaxTaskModelCalls is > 0) MaxTaskModelCalls = stepRes.MaxTaskModelCalls.Value;
             AccumulateUsage(run, stepRes.Usage);
+            _lastStepTimings = stepRes.Timings ?? [];
 
             if (!string.IsNullOrWhiteSpace(stepRes.Error))
             {
@@ -442,7 +472,7 @@ public sealed class AgentClientService(
 
             emptyRetries = 0;
             var serverResults = AgentClientTranscriptHelper.ParseServerToolResults(stepRes.ServerToolResults, logger);
-            var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, recentSignatures, snapshotJson, ct);
+            var (finished, finalSummary, updatedSnap) = await ExecuteToolBatchAsync(toolCalls, serverResults, run, messages, ledger, recentSignatures, snapshotJson, tracker, ct);
             snapshotJson = updatedSnap;
             if (finished) return finalSummary;
 
@@ -450,6 +480,15 @@ public sealed class AgentClientService(
             if (loopWarning != null)
             {
                 messages.Add(JsonSerializer.Serialize(new { role = "user", content = loopWarning }));
+            }
+            if (tracker.LoopBlocks >= AgentTaskRepeatTracker.MaxLoopBlocks && !injectedFinalCall)
+            {
+                injectedFinalCall = true;
+                messages.Add(JsonSerializer.Serialize(new
+                {
+                    role = "user",
+                    content = "[final call] The loop guard blocked repeated actions twice. Summarize what you have done or found and finish; do not repeat the blocked actions."
+                }));
             }
             NotifyChanged();
         }
@@ -481,7 +520,8 @@ public sealed class AgentClientService(
 
     private async Task<(bool Finished, string Summary, string SnapshotJson)> ExecuteToolBatchAsync(
         List<AgentToolCall> toolCalls, Dictionary<string, string> serverResults, TaskRunState run,
-        List<string> messages, List<string> ledger, List<string> recentSignatures, string snapshotJson, CancellationToken ct)
+        List<string> messages, List<string> ledger, List<string> recentSignatures, string snapshotJson,
+        AgentTaskRepeatTracker tracker, CancellationToken ct)
     {
         foreach (var call in toolCalls)
         {
@@ -499,10 +539,27 @@ public sealed class AgentClientService(
                 continue;
             }
 
+            // finish/ask_user must never be refused; every other UI tool passes the repeat tracker.
+            if (call.Name is not ("finish" or "ask_user"))
+            {
+                var repeatBlock = tracker.PreBlockReason(call.Name, call.ArgsJson);
+                if (repeatBlock != null)
+                {
+                    tracker.MarkLoopBlock();
+                    _entries[toolEntryIndex] = _entries[toolEntryIndex] with { IsBlocked = true };
+                    messages.Add(AgentClientTranscriptHelper.SerializeToolResult(
+                        call.Id, JsonSerializer.Serialize(new { ok = false, blocked = true, reason = repeatBlock })));
+                    continue;
+                }
+            }
+
             var (resJson, isFinish, summary, updatedSnap) = await toolDispatcher.ExecuteAsync(
                 call.Name, call.ArgsJson, snapshotJson, Mode, ledger, AskPermissionAsync, AskUserAsync,
                 (c, i, o, ci, cost) => { AccumulateRawUsage(run, c, i, o, ci, cost); return Task.CompletedTask; }, ct);
             snapshotJson = updatedSnap;
+            tracker.Record(call.Name, call.ArgsJson, AgentTaskRepeatTracker.ExtractFingerprint(resJson));
+            if (call.Name == "clear_filters" && resJson.Contains("\"canRestore\":true", StringComparison.Ordinal))
+                tracker.FiltersCleared = true;
             if (resJson.Contains("\"blocked\":true", StringComparison.Ordinal) || resJson.Contains("\"declined\":true", StringComparison.Ordinal))
                 _entries[toolEntryIndex] = _entries[toolEntryIndex] with { IsBlocked = true };
             if (call.Name is "go_to_page" or "select_tab" && resJson.Contains("\"ok\":true", StringComparison.Ordinal))
@@ -569,7 +626,9 @@ public sealed class AgentClientService(
         _entries.Add(new AgentChatEntry("question", question));
         NotifyChanged();
         using var reg = ct.Register(() => _userAnswerTcs.TrySetCanceled(ct));
-        return await _userAnswerTcs.Task;
+        var answer = await _userAnswerTcs.Task;
+        toolDispatcher.AppendUserEvidence(answer);
+        return answer;
     }
 
     private void AccumulateUsage(TaskRunState run, AgentUsageDto? u)
@@ -587,6 +646,7 @@ public sealed class AgentClientService(
     private void ResetCounters()
     {
         TotalCalls = 0; TotalInputTokens = 0; TotalOutputTokens = 0; TotalCost = 0m;
+        _lastStepTimings = [];
         ResetPromptState();
     }
 

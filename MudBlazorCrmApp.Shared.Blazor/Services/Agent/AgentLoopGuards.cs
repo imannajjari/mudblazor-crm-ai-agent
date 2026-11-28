@@ -19,6 +19,25 @@ public static partial class AgentLoopGuards
     [GeneratedRegex(@"\b(please\s+do|go\s+ahead\s+and)\b|همین\s*الان|انجامش\s*بده", RegexOptions.IgnoreCase)]
     private static partial Regex ExplicitOverridePattern();
 
+    [GeneratedRegex(@"((switch|change|move|enable|use|set|turn)\b[^.!?\u060C\u061F\n]{0,40}\b(auto|automatic)\b[^.!?\u060C\u061F\n]{0,20}(mode|state|behavio(u)r)?|حالت\s+(خودکار|auto)\b|\bauto[\s-]*mode\b|(به|با)\s+حالت\s+خودکار)", RegexOptions.IgnoreCase)]
+    private static partial Regex ModeAdvicePattern();
+
+    [GeneratedRegex(@"[^.!?\u060C\u061F\n]*((switch|change|move|enable|use|set|turn)\b[^.!?\u060C\u061F\n]{0,40}\b(auto|automatic)\b[^.!?\u060C\u061F\n]{0,20}(mode|state|behavio(u)r)?|حالت\s+(خودکار|auto)\b|\bauto[\s-]*mode\b|(به|با)\s+حالت\s+خودکار)[^.!?\u060C\u061F\n]*[.!?\u060C\u061F\n]*", RegexOptions.IgnoreCase)]
+    private static partial Regex ModeAdviceSentencePattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceCollapsePattern();
+
+    public static bool AdvisesModeSwitch(string? summary) =>
+        !string.IsNullOrWhiteSpace(summary) && ModeAdvicePattern().IsMatch(summary);
+
+    public static string StripModeAdvice(string? summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary)) return string.Empty;
+        var stripped = ModeAdviceSentencePattern().Replace(summary, " ");
+        return WhitespaceCollapsePattern().Replace(stripped, " ").Trim();
+    }
+
     public static bool IsDeleteTaskGoal(string? goal) =>
         !string.IsNullOrWhiteSpace(goal) && DeleteIntentPattern().IsMatch(goal);
 

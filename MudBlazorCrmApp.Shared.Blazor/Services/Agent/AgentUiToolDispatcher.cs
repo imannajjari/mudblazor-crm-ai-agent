@@ -54,6 +54,14 @@ public sealed class AgentUiToolDispatcher(
     public void ResetSafety() => ResetSafety(false, false, false);
     public void MarkRecordRead() => _safety.MarkRead();
     public string? CheckFinishAllowed() => _safety.CheckFinishOrNavAllowed();
+    public void SetUserEvidence(string? evidence) => _safety.SetUserEvidence(evidence);
+    public void AppendUserEvidence(string? text) => _safety.AppendUserEvidence(text);
+
+    public async Task RestoreFiltersAfterTaskAsync(CancellationToken ct = default)
+    {
+        try { await jsRuntime.InvokeVoidAsync("crmAgentDriver.restoreFilters", ct); }
+        catch (Exception ex) { logger.LogDebug(ex, "restoreFilters after task failed."); }
+    }
 
     public Task<string> CaptureSnapshotAsync(CancellationToken ct = default) => CaptureSnapshotAsync(15, ct);
 

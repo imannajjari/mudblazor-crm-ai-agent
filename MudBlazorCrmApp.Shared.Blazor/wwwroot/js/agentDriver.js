@@ -97,6 +97,9 @@ window.crmAgentDriver = (function () {
             || document.body;
     }
 
+    const SENSITIVE_LABEL_RE = /(password|token|secret|code|key|auth|رمز|عبور|کارت|شناسه)/i;
+    function isSensitiveLabel(label) { return SENSITIVE_LABEL_RE.test(label || ''); }
+
     function captureSnapshot(maxRowsParam) {
         elementMap.clear();
         const maxRows = Math.min(50, Math.max(1, Number(maxRowsParam) || 15));
@@ -126,7 +129,8 @@ window.crmAgentDriver = (function () {
             const isDate = !!ctrl.closest('.mud-picker');
             elementMap.set(id, isSelect ? ctrl.closest('.mud-select') : (isAuto ? ctrl.closest('.mud-autocomplete') : input));
             const kind = isSelect ? 'select' : (isAuto ? 'autocomplete' : (isDate ? 'date' : (input.tagName === 'TEXTAREA' ? 'textarea' : (input.type || 'text'))));
-            const isPassword = (input.type || '').toLowerCase() === 'password';
+            const isPassword = (input.type || '').toLowerCase() === 'password'
+                || isSensitiveLabel(label) || isSensitiveLabel(input.getAttribute('name') || '') || isSensitiveLabel(id);
             fields.push({
                 id,
                 label: label || id,
@@ -189,10 +193,12 @@ window.crmAgentDriver = (function () {
                 .map(th => cleanText(th.innerText))
                 .filter(Boolean);
 
+            const sensitiveCol = headers.map(h => isSensitiveLabel(h));
             const allRows = Array.from(table.querySelectorAll('tbody tr'));
             const rows = allRows.slice(0, maxRows).map((tr, rIdx) => {
-                const cells = Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText));
-                const key = slugify(cells.find(Boolean) || '', 30) || 'r' + (rIdx + 1);
+                const rawCells = Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText));
+                const cells = rawCells.map((c, cIdx) => sensitiveCol[cIdx] ? '***' : c);
+                const key = slugify(rawCells.find(Boolean) || '', 30) || 'r' + (rIdx + 1);
                 const rowId = claimId('g' + gridIdx + '_' + key, used);
                 elementMap.set(rowId, tr);
                 return { rowId, cells };
@@ -362,7 +368,8 @@ window.crmAgentDriver = (function () {
             return JSON.stringify({ ok: false, error: `Value exceeds maxLength (${input.maxLength}).` });
         }
 
-        const isPassword = (input.type || '').toLowerCase() === 'password';
+        const isPassword = (input.type || '').toLowerCase() === 'password'
+            || isSensitiveLabel(id) || isSensitiveLabel(input.name || '') || isSensitiveLabel(input.getAttribute('aria-label') || '');
         spotlightElement(input);
         input.focus();
         setNativeInputValue(input, strVal);
@@ -1031,7 +1038,41 @@ window.crmAgentDriver = (function () {
         return JSON.stringify({ ok: true });
     }
 
-    return {
+    function djb2(s) {
+        let h = 5381;
+        for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) | 0;
+        return h >>> 0;
+    }
+
+    // Compact identity of the current screen state (route + dialog + field ids/values),
+    // sent with every tool result so the client can detect no-op repeat loops.
+    function screenFingerprint() {
+        try {
+            const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
+            const topDialog = dialogs.length > 0 ? dialogs[dialogs.length - 1] : null;
+            const scope = topDialog || document.querySelector('.mud-main-content') || document.body;
+            const titleEl = (topDialog && topDialog.querySelector('.mud-dialog-title'))
+                || document.querySelector('h1, h2, h3, .mud-typography-h3, .mud-typography-h4');
+            const title = cleanText(titleEl ? titleEl.innerText : '');
+            const parts = [];
+            scope.querySelectorAll('input, select, textarea').forEach(el => {
+                if (el.closest('[data-agent-panel], .agent-panel')) return;
+                const id = (el.id || el.name || el.getAttribute('aria-label') || '').trim();
+                if (!id) return;
+                const type = (el.type || '').toLowerCase();
+                let v;
+                if (type === 'checkbox') v = String(!!el.checked);
+                else if (type === 'password' || isSensitiveLabel(id)) v = '';
+                else v = String(el.value || '').slice(0, 32);
+                parts.push(id + '=' + v);
+            });
+            const head = djb2((topDialog ? 'd:' : 'p:') + (window.location.pathname || '') + '|' + title).toString(36);
+            const body = djb2(parts.join('&')).toString(36);
+            return head + ':' + body;
+        } catch { return 'fp:na'; }
+    }
+
+    const api = {
         captureSnapshot,
         captureVisibleText,
         capturePicture,
@@ -1065,4 +1106,19 @@ window.crmAgentDriver = (function () {
         clearPanelState,
         bindFileDrop
     };
+    for (const key of Object.keys(api)) {
+        const fn = api[key];
+        if (typeof fn !== 'function') continue;
+        api[key] = async (...callArgs) => {
+            const res = await fn(...callArgs);
+            if (typeof res !== 'string') return res;
+            try {
+                const parsed = JSON.parse(res);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.fingerprint === undefined)
+                    parsed.fingerprint = screenFingerprint();
+                return JSON.stringify(parsed);
+            } catch { return res; }
+        };
+    }
+    return api;
 })();
