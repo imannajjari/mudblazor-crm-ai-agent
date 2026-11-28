@@ -233,7 +233,10 @@
                                             <span class="agent-steps__arrow" aria-hidden="true"></span>
                                             @if (isWorkingGroup)
                                             {
-                                                <span data-testid="agent-working" style="display:contents;">
+                                                @* Must be a real box (not display:contents): the e2e runner
+                                                   polls agent-working visibility to detect the end of a run. *@
+                                                <span class="agent-working" data-testid="agent-working"
+                                                      data-mode="@workMode.ToString().ToLowerInvariant()">
                                                     <AgentWorkingContent Mode="workMode" />
                                                 </span>
                                             }
