@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -48,43 +47,32 @@ public sealed class AnthropicAgentLlmProvider(
         if (tools is { Length: > 0 })
             payload["tools"] = ConvertTools(tools);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "messages")
+        var payloadJson = payload.ToJsonString();
+        HttpRequestMessage CreateRequest()
         {
-            Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Add("x-api-key", options.ApiKey);
-        request.Headers.Add("anthropic-version", AnthropicVersion);
+            var request = new HttpRequestMessage(HttpMethod.Post, "messages")
+            {
+                Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("x-api-key", options.ApiKey);
+            request.Headers.Add("anthropic-version", AnthropicVersion);
+            return request;
+        }
+
+        var send = await AgentProviderRetry.SendWithRetryAsync(
+            httpClient, CreateRequest, options.MaxProviderAttempts, options.ProviderRetryDelayMs, logger, cancellationToken);
+        if (!send.Ok)
+            return new LlmCallResult(null, new AgentUsageModel(), send.Error);
 
         try
         {
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-                return new LlmCallResult(null, new AgentUsageModel(), FormatError(response.StatusCode, body));
-
-            return ParseAnthropicResponse(body);
+            return ParseAnthropicResponse(send.Body!, options.MaxTokens, logger);
         }
-        catch (TaskCanceledException)
+        catch (JsonException ex)
         {
-            return new LlmCallResult(null, new AgentUsageModel(), "Model server request timed out.");
+            logger.LogError(ex, "Anthropic provider returned a non-JSON body.");
+            return new LlmCallResult(null, new AgentUsageModel(), "Model server returned an unreadable response.");
         }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error calling Anthropic LLM provider.");
-            return new LlmCallResult(null, new AgentUsageModel(), "Model server is unreachable.");
-        }
-    }
-
-    private string FormatError(HttpStatusCode code, string body)
-    {
-        logger.LogWarning("Anthropic provider returned {StatusCode}: {Body}", (int)code, body);
-        return code switch
-        {
-            HttpStatusCode.ServiceUnavailable => "Model server is temporarily busy (503). Please try again in a moment.",
-            HttpStatusCode.TooManyRequests => "Model server rate limit reached (429). Please wait a moment.",
-            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Model server rejected the API key.",
-            _ => $"Model server returned HTTP {(int)code}."
-        };
     }
 
     private static (string SystemText, JsonArray Messages) ConvertMessages(IReadOnlyList<JsonObject> messages)
@@ -223,7 +211,7 @@ public sealed class AnthropicAgentLlmProvider(
         return arr;
     }
 
-    private static LlmCallResult ParseAnthropicResponse(string body)
+    private static LlmCallResult ParseAnthropicResponse(string body, int maxTokens, ILogger logger)
     {
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
@@ -264,6 +252,17 @@ public sealed class AnthropicAgentLlmProvider(
 
         var assistant = new JsonObject { ["role"] = "assistant", ["content"] = string.Join("\n", textParts) };
         if (toolCalls.Count > 0) assistant["tool_calls"] = toolCalls;
+
+        // A tool call cut off at max_tokens arrives as broken argument JSON; report the
+        // truncation to the loop instead of feeding corrupted tool arguments back to the model.
+        var stopReason = root.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : null;
+        if (stopReason == "max_tokens" && toolCalls.Count > 0)
+        {
+            logger.LogWarning("Anthropic tool-call output was truncated at max_tokens={MaxTokens}.", maxTokens);
+            return new LlmCallResult(null, usage,
+                "Model output was cut off by the token limit while writing a tool call; raise Agent:MaxTokens or narrow the step.");
+        }
+
         return new LlmCallResult(assistant.ToJsonString(), usage, null);
     }
 }

@@ -20,6 +20,8 @@ public class AgentOptions
     public int MaxPriorTurns { get; set; } = 80;
     public decimal MaxTaskCostUsd { get; set; } = 0.80m;
     public int TimeoutSeconds { get; set; } = 90;
+    public int MaxProviderAttempts { get; set; } = 3;
+    public int ProviderRetryDelayMs { get; set; } = 700;
     public int HistoryDays { get; set; } = 90;
     public string? LoopbackBaseUrl { get; set; }
     public int MaxLoopbackResponseMB { get; set; } = 32;
@@ -57,6 +59,10 @@ public class AgentOptions
             MaxTaskCostUsd = 0.80m;
         if (TimeoutSeconds <= 0 || TimeoutSeconds > 300)
             TimeoutSeconds = 90;
+        if (MaxProviderAttempts <= 0 || MaxProviderAttempts > 5)
+            MaxProviderAttempts = 3;
+        if (ProviderRetryDelayMs < 0 || ProviderRetryDelayMs > 5000)
+            ProviderRetryDelayMs = 700;
         if (HistoryDays < 0 || HistoryDays > 3650)
             HistoryDays = 90;
         if (MaxLoopbackResponseMB <= 0 || MaxLoopbackResponseMB > 128)

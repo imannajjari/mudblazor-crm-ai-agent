@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -72,31 +71,25 @@ public sealed class OpenAiCompatibleAgentProvider(
             payload["tool_choice"] = "auto";
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
+        var payloadJson = payload.ToJsonString();
+        HttpRequestMessage CreateRequest()
         {
-            Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+            var request = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
+            {
+                Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+            return request;
+        }
+
+        var send = await AgentProviderRetry.SendWithRetryAsync(
+            httpClient, CreateRequest, options.MaxProviderAttempts, options.ProviderRetryDelayMs, logger, cancellationToken);
+        if (!send.Ok)
+            return new LlmCallResult(null, new AgentUsageModel(), send.Error);
 
         try
         {
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                logger.LogWarning("LLM provider returned {StatusCode}: {Body}", (int)response.StatusCode, body);
-                var message = response.StatusCode switch
-                {
-                    HttpStatusCode.ServiceUnavailable => "Model server is temporarily busy (503). Please try again in a moment.",
-                    HttpStatusCode.TooManyRequests => "Model server rate limit reached (429). Please wait a moment.",
-                    HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Model server rejected the API key.",
-                    _ => $"Model server returned HTTP {(int)response.StatusCode}."
-                };
-                return new LlmCallResult(null, new AgentUsageModel(), message);
-            }
-
-            using var doc = JsonDocument.Parse(body);
+            using var doc = JsonDocument.Parse(send.Body!);
             var root = doc.RootElement;
 
             var usage = new AgentUsageModel { Calls = 1 };
@@ -119,17 +112,26 @@ public sealed class OpenAiCompatibleAgentProvider(
                 return new LlmCallResult(null, usage, "Model server returned no choices.");
             }
 
-            var messageEl = choices[0].GetProperty("message");
+            var choice = choices[0];
+            var messageEl = choice.GetProperty("message");
+
+            // A tool call cut off at max_tokens arrives as broken argument JSON; report the
+            // truncation to the loop instead of feeding corrupted tool arguments back to the model.
+            var finishReason = choice.TryGetProperty("finish_reason", out var fr) ? fr.GetString() : null;
+            if (finishReason == "length" &&
+                messageEl.TryGetProperty("tool_calls", out var tcs) && tcs.GetArrayLength() > 0)
+            {
+                logger.LogWarning("Model tool-call output was truncated at max_tokens={MaxTokens}.", options.MaxTokens);
+                return new LlmCallResult(null, usage,
+                    "Model output was cut off by the token limit while writing a tool call; raise Agent:MaxTokens or narrow the step.");
+            }
+
             return new LlmCallResult(messageEl.GetRawText(), usage, null);
         }
-        catch (TaskCanceledException)
+        catch (JsonException ex)
         {
-            return new LlmCallResult(null, new AgentUsageModel(), "Model server request timed out.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error calling OpenAI-compatible LLM provider.");
-            return new LlmCallResult(null, new AgentUsageModel(), "Model server is unreachable.");
+            logger.LogError(ex, "Model server returned a non-JSON body.");
+            return new LlmCallResult(null, new AgentUsageModel(), "Model server returned an unreadable response.");
         }
     }
 }
