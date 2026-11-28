@@ -534,6 +534,7 @@ public sealed class AgentClientService(
             var toolEntryIndex = _entries.Count;
             _entries.Add(new AgentChatEntry("tool", $"{call.Name}({call.ArgsJson})"));
             recentSignatures.Add($"{call.Name}:{call.ArgsJson.Trim()}");
+            tracker.MarkAction(call.Name);
             NotifyChanged();
 
             if (serverResults.TryGetValue(call.Id, out var serverMsg))
@@ -574,6 +575,17 @@ public sealed class AgentClientService(
             _lastLedger.AddRange(ledger.Distinct(StringComparer.Ordinal));
             messages.Add(AgentClientTranscriptHelper.SerializeToolResult(call.Id, resJson));
 
+            if (isFinish && tracker.ShouldNudgeLearning())
+            {
+                // One-shot learning nudge: a long task that never touched remember/correct_fact
+                // gets one chance to record a lesson; the next finish is accepted unconditionally.
+                messages.Add(JsonSerializer.Serialize(new
+                {
+                    role = "user",
+                    content = "[learning nudge] This task took many steps. If the user taught a reusable CRM rule or you learned a convention worth keeping, call `remember` now (or `correct_fact` if a fact you were shown was wrong). If nothing is worth learning, call `finish` again with the same summary."
+                }));
+                break;
+            }
             if (isFinish)
             {
                 run.Close(AgentTaskOutcomeMemory.Done);

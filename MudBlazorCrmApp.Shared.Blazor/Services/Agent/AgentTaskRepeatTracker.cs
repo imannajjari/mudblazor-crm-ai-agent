@@ -13,6 +13,7 @@ public sealed class AgentTaskRepeatTracker
     public const int MaxSameCallAnywhere = 15;
     public const int MaxSelectTreeNodeCalls = 12;
     public const int MaxLoopBlocks = 2;
+    public const int LearningNudgeMinActions = 6;
 
     private const string SelectTreeNodeTool = "select_tree_node";
 
@@ -20,9 +21,32 @@ public sealed class AgentTaskRepeatTracker
     private readonly Dictionary<string, int> _sameCallAnyFingerprint = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _callsPerTool = new(StringComparer.Ordinal);
 
+    private int _actionsExecuted;
+    private bool _knowledgeWriteUsed;
+
     public string? LastFingerprint { get; private set; }
     public int LoopBlocks { get; private set; }
     public bool FiltersCleared { get; set; }
+    public bool LearningNudged { get; private set; }
+
+    /// <summary>Counts task-wide tool calls (server and UI) for the one-shot learning nudge.</summary>
+    public void MarkAction(string name)
+    {
+        if (name is "finish" or "ask_user") return;
+        _actionsExecuted++;
+        if (name is "remember" or "correct_fact") _knowledgeWriteUsed = true;
+    }
+
+    /// <summary>True once per task when a hard multi-step task finished without any knowledge write.
+    /// A task already forced to finish by the loop guard is not nudged.</summary>
+    public bool ShouldNudgeLearning()
+    {
+        if (LearningNudged || _knowledgeWriteUsed || LoopBlocks >= MaxLoopBlocks ||
+            _actionsExecuted < LearningNudgeMinActions)
+            return false;
+        LearningNudged = true;
+        return true;
+    }
 
     public string? PreBlockReason(string name, string argsJson)
     {

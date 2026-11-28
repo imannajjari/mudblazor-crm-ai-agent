@@ -20,7 +20,6 @@ public sealed class AgentKnowledgeService(
     private const int SideCallThreshold = 200;
     private const int MaxFactsInContext = 5;
     private const int MaxNoteChars = 1800;
-    private const int RetireAfterNotHelped = 2;
 
     private static long _unavailableUntilTicks;
     private static long _lastPurgeTicks;
@@ -250,7 +249,7 @@ public sealed class AgentKnowledgeService(
             if (entity == null) return JsonSerializer.Serialize(new { ok = false, reason = "Fact not found." });
 
             entity.NotHelpedCount++;
-            if (entity.NotHelpedCount >= RetireAfterNotHelped && entity.NotHelpedCount > entity.ConfirmCount)
+            if (entity.NotHelpedCount >= AgentKnowledgePurger.RetireAfterNotHelped && entity.NotHelpedCount > entity.ConfirmCount)
                 entity.IsRetired = true;
             await db.SaveChangesAsync(ct);
             MarkHealthy();
@@ -272,11 +271,8 @@ public sealed class AgentKnowledgeService(
 
         try
         {
-            var cutoff = DateTime.UtcNow.AddDays(-90);
-            var stale = await db.AgentKnowledge
-                .Where(k => (k.ModifiedDate ?? k.CreatedDate) < cutoff
-                            && ((k.LastUsedDate ?? k.CreatedDate) < cutoff || k.UseCount < 3))
-                .ToListAsync(ct);
+            var cutoff = AgentKnowledgePurger.Cutoff(DateTime.UtcNow);
+            var stale = await db.AgentKnowledge.Where(AgentKnowledgePurger.OlderThan(cutoff)).ToListAsync(ct);
             if (stale.Count > 0)
             {
                 db.AgentKnowledge.RemoveRange(stale);

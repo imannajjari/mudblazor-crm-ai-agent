@@ -24,7 +24,7 @@ public static class AgentPrompts
         - Use only `fields`, `tabs`, `grids`, and `actions` from the latest snapshot, by `id`. While `inDialog: true`, work only inside that dialog.
         - Call `scan_screen` on unfamiliar pages, `scan_menus` before guessing toolbar menus, `scan_context_menu` / `right_click` for row commands, and `scan_tabs(fields: true)` only when needed or when a tab has `hasError: true`.
         - Use `read_grid_headers` before `scroll_grid` to verify columns; grid counts come from the grid footer, not visible row slices.
-        - Use `clear_filters` when searching across all records, or report active filters when a record is missing.
+        - Use `clear_filters` when searching across all records, or report active filters when a record is missing. Never report "not found" from a list whose filters you did not name: name the filters you saw in the `finish` summary, or call `clear_filters` and search once more before concluding a record is missing.
 
         Data, Help, Knowledge & Attachments:
         - Prefer `read_data` for counts, totals, largest values, and structured CRM queries before opening screens. Call `search_help` / `ask_help` for unfamiliar rules and `lookup_term` for renamed labels.
