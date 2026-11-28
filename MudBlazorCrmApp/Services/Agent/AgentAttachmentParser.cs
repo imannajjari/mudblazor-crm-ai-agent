@@ -298,15 +298,11 @@ public static class AgentAttachmentParser
         }
         if (chunk == "VP8 " && b.Length >= 30)
         {
-            // Lossy keyframes store width-1/height-1 right after the 9D 01 2A sync code (RFC 6386).
-            var sync = -1;
-            for (var i = 20; i <= 26 && i + 7 <= b.Length; i++)
-            {
-                if (b[i] == 0x9D && b[i + 1] == 0x01 && b[i + 2] == 0x2A) { sync = i; break; }
-            }
-            if (sync < 0) return false;
-            width = (BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(sync + 3, 2)) & 0x3FFF) + 1;
-            height = (BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(sync + 5, 2)) & 0x3FFF) + 1;
+            // RFC 6386 keyframe: 3-byte frame tag then the 9D 01 2A sync lands at offset 23 exactly;
+            // width-1/height-1 follow in 16-bit LE fields (top 2 bits are scales, masked off).
+            if (b[23] != 0x9D || b[24] != 0x01 || b[25] != 0x2A) return false;
+            width = (BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(26, 2)) & 0x3FFF) + 1;
+            height = (BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(28, 2)) & 0x3FFF) + 1;
             return true;
         }
         return false;

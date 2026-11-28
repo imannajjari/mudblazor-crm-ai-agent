@@ -68,8 +68,8 @@ public class AgentAttachmentHardeningTests
     public void WebpVp8x_HugeCanvas_IsRejectedBeforeVision()
     {
         var webp = WebpHeader("VP8X", 20);
-        webp[24] = 0x8D; webp[25] = 0x8C; webp[26] = 0x00; // width-1 = 36000
-        webp[27] = 0x8D; webp[28] = 0x8C; webp[29] = 0x00; // height-1 = 36000
+        webp[24] = 0xA0; webp[25] = 0x8C; webp[26] = 0x00; // width-1 = 36000
+        webp[27] = 0xA0; webp[28] = 0x8C; webp[29] = 0x00; // height-1 = 36000
         var res = AgentAttachmentParser.ParseAndSniff(".webp", webp);
         Assert.NotNull(res.Error);
         Assert.Contains("maximum resolution", res.Error, StringComparison.Ordinal);
@@ -88,6 +88,25 @@ public class AgentAttachmentHardeningTests
 
         var noSync = WebpHeader("VP8 ", 20);
         Assert.Equal("Could not read image dimensions.", AgentAttachmentParser.ParseAndSniff(".webp", noSync).Error);
+    }
+
+    [Fact]
+    public void WebpVp8Lossless_RequiresSignatureThenReadsDimensions()
+    {
+        var webp = WebpHeader("VP8L", 40);
+        webp[20] = 0x2F;
+        var bits = 19 | (9 << 14); // width-1=19, height-1=9
+        webp[21] = (byte)bits;
+        webp[22] = (byte)(bits >> 8);
+        webp[23] = (byte)(bits >> 16);
+        webp[24] = (byte)(bits >> 24);
+
+        var res = AgentAttachmentParser.ParseAndSniff(".webp", webp);
+        Assert.Null(res.Error);
+        Assert.Contains("(20x10,", res.Summary);
+
+        var noSignature = WebpHeader("VP8L", 40); // b[20] stays 0
+        Assert.Equal("Could not read image dimensions.", AgentAttachmentParser.ParseAndSniff(".webp", noSignature).Error);
     }
 
     [Fact]
