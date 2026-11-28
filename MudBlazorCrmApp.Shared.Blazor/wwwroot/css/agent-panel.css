@@ -192,6 +192,19 @@ body.mud-application-dark-mode [data-agent-panel] {
     position: relative;
 }
 
+/* Accent bar across the top of the panel so it is immediately recognisable as the assistant. */
+.agent-panel__body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--agent-accent);
+    z-index: 14;
+    border-radius: 20px 20px 0 0;
+}
+
 .agent-floating-panel.agent-panel__body {
     position: fixed;
     bottom: 24px;
@@ -217,12 +230,23 @@ body.mud-application-dark-mode [data-agent-panel] {
     cursor: grab;
     user-select: none;
     touch-action: none;
+    background: color-mix(in srgb, var(--agent-accent) 6%, transparent);
+    border-radius: 0;
 }
 
 .agent-panel__title {
     font-size: 18px;
     font-weight: 600;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-panel__title::before {
+    content: '✦';
+    color: var(--agent-accent);
+    font-size: 16px;
 }
 
 .agent-panel__header-buttons {
