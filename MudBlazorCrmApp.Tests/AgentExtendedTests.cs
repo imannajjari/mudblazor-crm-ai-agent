@@ -813,6 +813,68 @@ public class AgentExtendedTests
     }
 
     [Fact]
+    public void Wave4_RequestBuilder_LeavesTrailingToolUseBlocksUnmarked()
+    {
+        var messages = new List<JsonObject>
+        {
+            new() { ["role"] = "system", ["content"] = "Sys" },
+            new() { ["role"] = "user", ["content"] = "Go" },
+            new()
+            {
+                ["role"] = "assistant",
+                ["content"] = "",
+                ["tool_calls"] = new JsonArray(new JsonObject
+                {
+                    ["id"] = "tu_9",
+                    ["function"] = new JsonObject { ["name"] = "click_action", ["arguments"] = "{}" }
+                })
+            }
+        };
+        var payload = AnthropicAgentRequestBuilder.BuildPayload("claude-sonnet-4", 100, messages, [AgentToolSchemas.GetTools()[0]]);
+        using var doc = JsonDocument.Parse(payload.ToJsonString());
+
+        var msgs = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+        var lastBlocks = msgs[^1].GetProperty("content").EnumerateArray().ToList();
+        Assert.Equal("tool_use", lastBlocks[^1].GetProperty("type").GetString());
+        Assert.False(lastBlocks[^1].TryGetProperty("cache_control", out _));
+
+        Assert.True(JsonDocument.Parse(doc.RootElement.GetProperty("system").GetRawText()).RootElement
+            .EnumerateArray().First().TryGetProperty("cache_control", out _));
+        Assert.True(doc.RootElement.GetProperty("tools").EnumerateArray().First().TryGetProperty("cache_control", out _));
+    }
+
+    [Fact]
+    public void Wave4_RequestBuilder_KeepsNonEmptyTextForDroppedImagesAndIgnoresEmptyToolCalls()
+    {
+        var messages = new List<JsonObject>
+        {
+            new()
+            {
+                ["role"] = "user",
+                ["content"] = new JsonArray(new JsonObject
+                {
+                    ["type"] = "image_url",
+                    ["image_url"] = new JsonObject { ["url"] = "https://example.com/x.png" }
+                })
+            },
+            new() { ["role"] = "assistant", ["content"] = "ok", ["tool_calls"] = new JsonArray() }
+        };
+        var payload = AnthropicAgentRequestBuilder.BuildPayload("claude-sonnet-4", 100, messages, null);
+        using var doc = JsonDocument.Parse(payload.ToJsonString());
+        var msgs = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+
+        var firstBlock = Assert.Single(msgs[0].GetProperty("content").EnumerateArray().ToList());
+        Assert.Equal("text", firstBlock.GetProperty("type").GetString());
+        Assert.Equal(" ", firstBlock.GetProperty("text").GetString());
+        Assert.False(firstBlock.TryGetProperty("cache_control", out _));
+
+        var assistantBlock = Assert.Single(msgs[^1].GetProperty("content").EnumerateArray().ToList());
+        Assert.Equal("ok", assistantBlock.GetProperty("text").GetString());
+        Assert.True(assistantBlock.TryGetProperty("cache_control", out _));
+        Assert.False(doc.RootElement.TryGetProperty("tools", out _));
+    }
+
+    [Fact]
     public async Task Wave3_ChartService_Tool_And_WidgetParser_RoundTrip()
     {
         var tool = new AgentChartServerTool();

@@ -49,7 +49,8 @@ public static class AnthropicAgentRequestBuilder
         if (messages.Count == 0 || messages[^1] is not JsonObject last) return;
         if (last["content"] is not JsonArray blocks)
         {
-            blocks = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = TryGetString(last["content"]) ?? "" });
+            var text = TryGetString(last["content"]);
+            blocks = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = string.IsNullOrEmpty(text) ? " " : text });
             last["content"] = blocks;
         }
         for (var i = blocks.Count - 1; i >= 0; i--)
@@ -85,7 +86,7 @@ public static class AnthropicAgentRequestBuilder
                 });
                 continue;
             }
-            if (role == "assistant" && msg["tool_calls"] is JsonArray tcs)
+            if (role == "assistant" && msg["tool_calls"] is JsonArray tcs && tcs.Count > 0)
             {
                 list.Add(new JsonObject { ["role"] = "assistant", ["content"] = ConvertAssistantToolCalls(msg, tcs) });
                 continue;
@@ -175,7 +176,7 @@ public static class AnthropicAgentRequestBuilder
             }
         }
         if (blocks.Count == 0)
-            blocks.Add(new JsonObject { ["type"] = "text", ["text"] = "" });
+            blocks.Add(new JsonObject { ["type"] = "text", ["text"] = " " }); // Anthropic rejects empty text blocks
         return blocks;
     }
 
