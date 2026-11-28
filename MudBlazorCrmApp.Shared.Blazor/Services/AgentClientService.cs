@@ -75,6 +75,7 @@ public sealed class AgentClientService(
     private readonly List<AgentChatEntry> _entries = [];
     private readonly List<string> _lastLedger = [];
     private readonly List<string> _openedLedger = [];
+    private readonly List<AgentTaskOutcome> _recentOutcomes = [];
     public IReadOnlyList<string> LastLedger => _lastLedger;
     public IReadOnlyList<string> OpenedLedger => _openedLedger;
     private TaskCompletionSource<string>? _userAnswerTcs;
@@ -123,6 +124,8 @@ public sealed class AgentClientService(
         _openedLedger.Clear();
         _attachedFiles.Clear(); // prevent leaking attachments across chats
         _entries.AddRange(AgentClientTranscriptHelper.DeserializeHistory(detail.HistoryJson, chatKey, logger));
+        _recentOutcomes.Clear();
+        _recentOutcomes.AddRange(AgentTaskOutcomeMemory.Parse(detail.LogJson));
         permissionGate.ResetSession();
         ResetCounters();
         TotalCalls = detail.TotalCalls;
@@ -149,6 +152,7 @@ public sealed class AgentClientService(
         _entries.Clear();
         _lastLedger.Clear();
         _openedLedger.Clear();
+        _recentOutcomes.Clear();
         _attachedFiles.Clear();
         permissionGate.ResetSession();
         ResetCounters();
@@ -220,6 +224,7 @@ public sealed class AgentClientService(
             _entries.Clear();
             _lastLedger.Clear();
             _openedLedger.Clear();
+            _recentOutcomes.Clear();
             _attachedFiles.Clear(); // clear attachments on logout
             SavedChats = [];
             permissionGate.ResetSession();
@@ -305,19 +310,24 @@ public sealed class AgentClientService(
             toolDispatcher.ResetSafety(isDeleteGoal, activeFiles.Count > 0, adviceOnlyGoal);
             var snapshotJson = await toolDispatcher.CaptureSnapshotAsync(ct);
             var goalPrefix = isDeleteGoal ? "[Delete task: yes]\n" : string.Empty;
+            // The outcomes block follows the goal line, so server guards that read the first line are unaffected.
+            var outcomeBlock = AgentTaskOutcomeMemory.Block(_recentOutcomes);
+            var goalText = outcomeBlock.Length == 0 ? goalPrefix + goal : goalPrefix + goal + "\n\n" + outcomeBlock;
             var taskPrompt = activeFiles.Count == 0
-                ? goalPrefix + goal
-                : string.Join("\n", activeFiles.Select(f => $"[att:{f.Id} \"{f.FileName}\", {f.Kind}]")) + "\n" + goalPrefix + goal;
+                ? goalText
+                : string.Join("\n", activeFiles.Select(f => $"[att:{f.Id} \"{f.FileName}\", {f.Kind}]")) + "\n" + goalText;
             messages = AgentClientTranscriptHelper.BuildInitialMessages(priorTurns, taskPrompt, snapshotJson);
             lastSummary = await ExecuteStepLoopAsync(run, messages, ledger, snapshotJson, ct);
         }
         catch (OperationCanceledException)
         {
+            run.Close(AgentTaskOutcomeMemory.Stopped);
             if (run.ChatKey == CurrentChatKey) _entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Agent task execution failed.");
+            run.Close(AgentTaskOutcomeMemory.Error, ex.Message);
             if (run.ChatKey == CurrentChatKey) _entries.Add(new AgentChatEntry("error", ex.Message));
         }
         finally
@@ -341,6 +351,7 @@ public sealed class AgentClientService(
             if (run.Calls >= MaxTaskModelCalls || run.Cost >= MaxTaskCostUsd)
             {
                 _entries.Add(new AgentChatEntry("info", $"Task budget reached (calls: {run.Calls}/{MaxTaskModelCalls}, cost: ${run.Cost:0.0000}/${MaxTaskCostUsd:0.00})."));
+                run.Close(AgentTaskOutcomeMemory.Blocked, "budget reached");
                 return string.Empty;
             }
 
@@ -356,14 +367,29 @@ public sealed class AgentClientService(
             }
 
             var stepRes = await _stepApi.PostStepAsync(messages, run, ct);
-            if (stepRes == null) { _entries.Add(new AgentChatEntry("error", "Empty response from agent server.")); return string.Empty; }
+            if (stepRes == null)
+            {
+                _entries.Add(new AgentChatEntry("error", "Empty response from agent server."));
+                run.Close(AgentTaskOutcomeMemory.Error, "empty response");
+                return string.Empty;
+            }
 
             if (stepRes.MaxTaskCostUsd is > 0) MaxTaskCostUsd = stepRes.MaxTaskCostUsd.Value;
             if (stepRes.MaxTaskModelCalls is > 0) MaxTaskModelCalls = stepRes.MaxTaskModelCalls.Value;
             AccumulateUsage(run, stepRes.Usage);
 
-            if (!string.IsNullOrWhiteSpace(stepRes.Error)) { _entries.Add(new AgentChatEntry("error", stepRes.Error)); return string.Empty; }
-            if (string.IsNullOrWhiteSpace(stepRes.Assistant)) { _entries.Add(new AgentChatEntry("error", "Assistant returned an empty message.")); return string.Empty; }
+            if (!string.IsNullOrWhiteSpace(stepRes.Error))
+            {
+                _entries.Add(new AgentChatEntry("error", stepRes.Error));
+                run.Close(AgentTaskOutcomeMemory.Error, stepRes.Error);
+                return string.Empty;
+            }
+            if (string.IsNullOrWhiteSpace(stepRes.Assistant))
+            {
+                _entries.Add(new AgentChatEntry("error", "Assistant returned an empty message."));
+                run.Close(AgentTaskOutcomeMemory.Error, "empty message");
+                return string.Empty;
+            }
 
             foreach (var p in stepRes.Prior ?? [])
             {
@@ -376,6 +402,7 @@ public sealed class AgentClientService(
             if (!AgentClientTranscriptHelper.TryParseToolCalls(stepRes.Assistant, out var textReply, out var toolCalls))
             {
                 _entries.Add(new AgentChatEntry("error", "Assistant returned malformed JSON."));
+                run.Close(AgentTaskOutcomeMemory.Error, "malformed JSON");
                 return string.Empty;
             }
 
@@ -403,6 +430,8 @@ public sealed class AgentClientService(
                     }
                 }
                 var summaryText = string.IsNullOrWhiteSpace(textReply) ? appText["AGENT_EMPTY_REPLY"] : textReply;
+                if (string.IsNullOrWhiteSpace(textReply)) run.Close(AgentTaskOutcomeMemory.Blocked, "empty reply");
+                else run.Close(AgentTaskOutcomeMemory.Done);
                 var summary = AgentClientTranscriptHelper.AppendLedger(summaryText, ledger, appText["AGENT_ACTIONS_DONE"]);
                 _entries.Add(new AgentChatEntry("assistant", summary));
                 return summary;
@@ -421,6 +450,7 @@ public sealed class AgentClientService(
             }
             NotifyChanged();
         }
+        run.Close(AgentTaskOutcomeMemory.Blocked, "step limit reached");
         return string.Empty;
     }
 
@@ -480,6 +510,7 @@ public sealed class AgentClientService(
 
             if (isFinish)
             {
+                run.Close(AgentTaskOutcomeMemory.Done);
                 var finalSummary = AgentClientTranscriptHelper.AppendLedger(summary ?? string.Empty, ledger, appText["AGENT_ACTIONS_DONE"]);
                 _entries.Add(new AgentChatEntry("assistant", finalSummary));
                 return (true, finalSummary, snapshotJson);
@@ -497,6 +528,7 @@ public sealed class AgentClientService(
         NotifyChanged();
 
         if (run.ChatKey != CurrentChatKey) return;
+        AgentTaskOutcomeMemory.Add(_recentOutcomes, goal, run.Outcome, run.OutcomeReason);
         try
         {
             AgentClientTranscriptHelper.BlankAttachmentToolResults(messages, logger);
@@ -504,7 +536,8 @@ public sealed class AgentClientService(
             await chatStore.SaveChatAndTaskAsync(
                 run.ChatKey, run.TaskSeq, goal, lastSummary,
                 JsonSerializer.Serialize(_entries), JsonSerializer.Serialize(messages),
-                run.InputTokens, run.OutputTokens, run.CachedInputTokens, run.Cost, run.Calls, durationMs);
+                run.InputTokens, run.OutputTokens, run.CachedInputTokens, run.Cost, run.Calls, durationMs,
+                AgentTaskOutcomeMemory.Serialize(_recentOutcomes));
             await LoadChatsAsync();
         }
         catch (Exception ex)

@@ -83,13 +83,14 @@ public sealed class AgentChatStoreClient(
         int cachedInputTokens,
         decimal cost,
         int modelCalls,
-        int durationMs)
+        int durationMs,
+        string logJson)
     {
         try
         {
             var title = goal.Length > 80 ? goal[..80] : goal;
             using var chatReq = await CreateRequestAsync(HttpMethod.Put, $"/api/agentchat/{chatKey}");
-            chatReq.Content = JsonContent.Create(new { title, historyJson, logJson = "[]" });
+            chatReq.Content = JsonContent.Create(new { title, historyJson, logJson });
             using var chatRes = await httpClient.SendAsync(chatReq);
             chatRes.EnsureSuccessStatusCode();
 

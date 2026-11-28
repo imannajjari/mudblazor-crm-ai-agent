@@ -25,6 +25,14 @@ internal sealed class TaskRunState(string chatKey, int taskSeq, DateTimeOffset s
     public int OutputTokens { get; set; }
     public int CachedInputTokens { get; set; }
     public decimal Cost { get; set; }
+    public string Outcome { get; private set; } = AgentTaskOutcomeMemory.Error;
+    public string OutcomeReason { get; private set; } = string.Empty;
+
+    public void Close(string outcome, string reason = "")
+    {
+        Outcome = outcome;
+        OutcomeReason = reason;
+    }
 }
 
 internal sealed class AgentStatusDto
