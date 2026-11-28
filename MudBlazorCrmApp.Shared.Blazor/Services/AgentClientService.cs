@@ -564,7 +564,11 @@ public sealed class AgentClientService(
                 call.Name, call.ArgsJson, snapshotJson, Mode, ledger, AskPermissionAsync, AskUserAsync,
                 (c, i, o, ci, cost) => { AccumulateRawUsage(run, c, i, o, ci, cost); return Task.CompletedTask; }, ct);
             snapshotJson = updatedSnap;
-            tracker.Record(call.Name, call.ArgsJson, AgentTaskRepeatTracker.ExtractFingerprint(resJson));
+            // Blocked executions change nothing on screen, so count them against the previous
+            // fingerprint; otherwise identical blocked calls could repeat up to the 15-call cap.
+            var fingerprint = AgentTaskRepeatTracker.ExtractFingerprint(resJson) ??
+                (resJson.Contains("\"blocked\":true", StringComparison.Ordinal) ? tracker.LastFingerprint : null);
+            tracker.Record(call.Name, call.ArgsJson, fingerprint);
             if (call.Name == "clear_filters" && resJson.Contains("\"canRestore\":true", StringComparison.Ordinal))
                 tracker.FiltersCleared = true;
             if (resJson.Contains("\"blocked\":true", StringComparison.Ordinal) || resJson.Contains("\"declined\":true", StringComparison.Ordinal))

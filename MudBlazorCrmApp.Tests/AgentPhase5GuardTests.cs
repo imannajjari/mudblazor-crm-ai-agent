@@ -58,6 +58,35 @@ public class AgentPhase5GuardTests
     }
 
     [Fact]
+    public void SafetyState_MaskedRecordHint_NeverBlocksWrongRecord()
+    {
+        // The masked Id column used to become the hint and blocked EVERY save after select_grid_row.
+        var star = new AgentSafetyState { SelectedRecordHint = "***" };
+        Assert.Null(star.CheckWrongRecord("""{"inDialog":true,"title":"Edit Task","dialogText":"Name","fields":[{"value":"Follow up with lead"}]}""", null));
+
+        var hidden = new AgentSafetyState { SelectedRecordHint = "(hidden)" };
+        Assert.Null(hidden.CheckWrongRecord("""{"inDialog":true,"title":"Edit Task","dialogText":"Name","fields":[{"value":"Follow up with lead"}]}""", null));
+
+        // A real name hint still enforces the match.
+        var named = new AgentSafetyState { SelectedRecordHint = "Follow up with lead" };
+        Assert.Null(named.CheckWrongRecord("""{"inDialog":true,"title":"Edit Task","dialogText":"","fields":[{"value":"Follow up with lead"}]}""", null));
+        Assert.NotNull(named.CheckWrongRecord("""{"inDialog":true,"title":"Edit Task","dialogText":"","fields":[{"value":"Unrelated task"}]}""", null));
+    }
+
+    [Fact]
+    public void RepeatTracker_BlockedCallsWithoutFingerprintCountAgainstLastFingerprint()
+    {
+        // A fingerprint-less snapshot guard block reuses the last screen fingerprint so the
+        // exact-repeat cap (MaxSameCall) fires instead of allowing up to MaxSameCallAnywhere.
+        var tracker = new AgentTaskRepeatTracker();
+        tracker.Record("scan_screen", "{}", "fp_1");
+        for (var i = 0; i < AgentTaskRepeatTracker.MaxSameCall; i++)
+            tracker.Record("click_action", """{"id":"btn_update"}""", tracker.LastFingerprint);
+
+        Assert.NotNull(tracker.PreBlockReason("click_action", """{"id":"btn_update"}"""));
+    }
+
+    [Fact]
     public void RepeatTracker_CanonicalizesJsonArgsSoReformattingCannotEvadeCaps()
     {
         var tracker = new AgentTaskRepeatTracker();

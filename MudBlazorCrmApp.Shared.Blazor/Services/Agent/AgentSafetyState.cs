@@ -126,12 +126,16 @@ public sealed partial class AgentSafetyState
             if (explicitTarget is { Length: >= 3 } && !combined.Contains(explicitTarget, StringComparison.OrdinalIgnoreCase))
                 return $"Open dialog content does not mention expected target record '{explicitTarget}'. Verify the selected row before acting.";
 
-            if (hint is { Length: >= 3 } && !combined.Contains(hint, StringComparison.OrdinalIgnoreCase))
-                return $"Open dialog content does not match previously selected record '{hint}'. Verify the selected row before acting.";
+            if (hint is { Length: >= 3 } && !IsMaskedPlaceholder(hint) && !combined.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                return $"Open dialog content does not match previously selected record '{hint}'. Verify the selected row before acting; do not repeat the same call — select_grid_row again or report which record the dialog shows.";
         }
         catch (JsonException) { /* invalid snapshot handled elsewhere */ }
         return null;
     }
+
+    // Snapshot masking replaces sensitive values with these placeholders; they must never act
+    // as the "selected record" evidence in CheckWrongRecord (see SelectGridRowHandler hint).
+    private static bool IsMaskedPlaceholder(string s) => s is "***" or "(hidden)";
 
     public static bool IsSensitiveField(string snapshotJson, string id)
     {

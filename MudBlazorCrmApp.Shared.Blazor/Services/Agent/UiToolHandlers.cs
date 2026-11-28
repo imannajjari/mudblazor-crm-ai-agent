@@ -336,7 +336,9 @@ public sealed class SelectGridRowHandler : IUiToolHandler
                     {
                         return cells.EnumerateArray()
                             .Select(c => c.GetString() ?? "")
-                            .FirstOrDefault(s => s.Trim().Length >= 2);
+                            // The Id column is masked as '***' on every list page (sensitive-label "شناسه");
+                            // a masked cell is a useless hint and made CheckWrongRecord block every save.
+                            .FirstOrDefault(s => s.Trim().Length >= 2 && s.Trim() is not ("***" or "(hidden)"));
                     }
                 }
             }
