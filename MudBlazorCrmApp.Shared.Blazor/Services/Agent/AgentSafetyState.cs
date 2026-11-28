@@ -13,6 +13,11 @@ public sealed partial class AgentSafetyState
         "TBD", "TODO", "N/A", "NA", "UNKNOWN", "PLACEHOLDER", "DUMMY", "XXX"
     };
 
+    private static readonly string[] SyntheticEmailDomains =
+    [
+        "example.com", "example.org", "example.net", "test.com", "invalid.com", "dummy.com", "placeholder.com"
+    ];
+
     [GeneratedRegex(@"^([a-zA-Z]:\\|/tmp/|/var/|data:[^;]+;base64,)", RegexOptions.IgnoreCase)]
     private static partial Regex FileValuePattern();
 
@@ -32,6 +37,7 @@ public sealed partial class AgentSafetyState
     private string _userEvidence = string.Empty;
 
     public void MarkDirty() => HasUnsavedChanges = true;
+    // Batch-scoped on purpose: one confirmation covers the whole attachment-backed import.
     public void MarkSaved() => HasUnsavedChanges = false;
     public void MarkRead() => HasReadBeforeDelete = true;
     public void MarkDeleteRefused() => DeleteRefused = true;
@@ -84,6 +90,24 @@ public sealed partial class AgentSafetyState
     public static bool IsFileLikeFieldValue(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&
         (FileValuePattern().IsMatch(value.Trim()) || value.Length > 2000 && !value.Contains(' '));
+
+    /// <summary>
+    /// Heuristic check for fabricated placeholder addresses (example.com and friends). Subdomains
+    /// and a trailing dot are normalized so "a@sub.example.com." cannot slip past the guard.
+    /// </summary>
+    public static bool IsSyntheticEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var v = value.Trim().TrimEnd('.');
+        var atIdx = v.LastIndexOf('@');
+        if (atIdx < 0 || atIdx == v.Length - 1) return false;
+        var domain = v[(atIdx + 1)..];
+        foreach (var synthetic in SyntheticEmailDomains)
+            if (domain.Equals(synthetic, StringComparison.OrdinalIgnoreCase) ||
+                domain.EndsWith("." + synthetic, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
 
     public string? CheckReplacedDelete(string risk) =>
         DeleteRefused && risk is "save" or "write"

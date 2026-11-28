@@ -269,43 +269,106 @@ public sealed partial class AgentAttachmentService(
         if (rec.Kind == "Image")
             return JsonSerializer.Serialize(new { ok = false, error = "Use ask_attachment to inspect attached images." });
 
-        if (rec.Sheets.Count == 0)
-        {
-            var text = rec.RawText ?? "";
-            var offset = Math.Clamp(fromRow, 0, text.Length);
-            var len = Math.Min(MaxCharsPerRead, text.Length - offset);
-            var slice = text.Substring(offset, len);
-            return JsonSerializer.Serialize(new
-            {
-                ok = true, fileName = rec.FileName, fromOffset = offset, returnedChars = len,
-                totalChars = text.Length, nextOffset = offset + len, content = WrapContent(rec.Id, rec.FileName, slice)
-            });
-        }
+        return rec.Sheets.Count == 0
+            ? ReadTextPage(rec, fromRow, rowCount)
+            : ReadSheetPage(rec, sheetName, fromRow, rowCount);
+    }
 
+    private static string ReadTextPage(AttachmentRecord rec, int fromRow, int rowCount)
+    {
+        var text = (rec.RawText ?? "").Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        // A trailing newline terminates the last line; it does not add a phantom empty line.
+        if (text.EndsWith('\n')) text = text[..^1];
+        string[] lines = text.Length == 0 ? [] : text.Split('\n');
+        var start = Math.Clamp(fromRow, 0, lines.Length);
+        var take = Math.Clamp(rowCount <= 0 ? 50 : rowCount, 1, 200);
+        var selected = new List<string>();
+        var chars = 0;
+        var truncated = false;
+        foreach (var line in lines.Skip(start).Take(take))
+        {
+            var cost = line.Length + (selected.Count == 0 ? 0 : 1);
+            if (chars + cost > MaxCharsPerRead)
+            {
+                if (selected.Count == 0)
+                {
+                    selected.Add(line[..MaxCharsPerRead]);
+                    truncated = true;
+                }
+                break;
+            }
+            selected.Add(line);
+            chars += cost;
+        }
+        var next = start + selected.Count;
+        return JsonSerializer.Serialize(new
+        {
+            ok = true, fileName = rec.FileName, fromRow = start, returnedRows = selected.Count,
+            totalRows = lines.Length, nextFromRow = next,
+            hasMore = next < lines.Length, truncated,
+            hint = truncated ? "The first line exceeds the read budget and was cut. Use ask_attachment for its full content." : null,
+            content = WrapContent(rec.Id, rec.FileName, string.Join("\n", selected))
+        });
+    }
+
+    private static string ReadSheetPage(AttachmentRecord rec, string? sheetName, int fromRow, int rowCount)
+    {
         var sheet = string.IsNullOrWhiteSpace(sheetName)
             ? rec.Sheets.FirstOrDefault(s => !s.Hidden) ?? rec.Sheets[0]
             : rec.Sheets.FirstOrDefault(s => string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase));
         if (sheet == null)
             return JsonSerializer.Serialize(new { ok = false, error = "No such sheet.", sheets = rec.Sheets.Select(s => s.Name) });
 
-        var start = Math.Max(0, fromRow);
+        var start = Math.Clamp(fromRow, 0, sheet.Rows.Count);
         var take = Math.Clamp(rowCount <= 0 ? 50 : rowCount, 1, 200);
         var selected = new List<string[]>();
         var chars = 0;
+        var truncated = false;
         foreach (var row in sheet.Rows.Skip(start).Take(take))
         {
             var rowLen = row.Sum(c => c.Length + 4);
-            if (selected.Count > 0 && chars + rowLen > MaxCharsPerRead) break;
+            if (chars + rowLen > MaxCharsPerRead)
+            {
+                if (selected.Count == 0)
+                {
+                    selected.Add(TruncateRow(row, MaxCharsPerRead));
+                    truncated = true;
+                }
+                break;
+            }
             selected.Add(row);
             chars += rowLen;
         }
+
         var rowsJson = JsonSerializer.Serialize(new { headers = sheet.Headers, rows = selected });
+        var nextFromRow = start + selected.Count;
         return JsonSerializer.Serialize(new
         {
             ok = true, fileName = rec.FileName, sheet = sheet.Name, fromRow = start,
-            returnedRows = selected.Count, totalRows = sheet.Rows.Count, nextFromRow = start + selected.Count,
+            returnedRows = selected.Count, totalRows = sheet.Rows.Count, nextFromRow,
+            hasMore = nextFromRow < sheet.Rows.Count, truncated,
+            hint = truncated ? "The first row exceeds the read budget and was cut. Use ask_attachment for its full content." : null,
             content = WrapContent(rec.Id, rec.FileName, rowsJson)
         });
+    }
+
+    private static string[] TruncateRow(string[] row, int budget)
+    {
+        var cells = new List<string>();
+        var used = 0;
+        foreach (var cell in row)
+        {
+            var cost = cell.Length + 4;
+            if (cells.Count > 0 && used + cost > budget) break;
+            if (cells.Count == 0 && cost > budget)
+            {
+                cells.Add(cell[..Math.Max(0, budget - 4)]);
+                break;
+            }
+            cells.Add(cell);
+            used += cost;
+        }
+        return [.. cells];
     }
 
     private string? TryAdmit(AttachmentRecord rec)
@@ -350,8 +413,19 @@ public sealed partial class AgentAttachmentService(
         return string.IsNullOrWhiteSpace(cleaned) ? "file" : cleaned;
     }
 
-    private static string FormatSheetsPreview(List<AttachmentSheet> sheets) =>
-        string.Join("\n\n", sheets.Select(s => $"Sheet: {s.Name}\n" + string.Join("\n", s.Rows.Take(50).Select(r => string.Join(" | ", r)))));
+    internal static string FormatSheetsPreview(List<AttachmentSheet> sheets) =>
+        string.Join("\n\n", sheets.Select(s =>
+        {
+            var headerLine = s.Headers.Count > 0
+                ? "Headers: " + string.Join(" | ", s.Headers) + "\n"
+                : "";
+            var shownRows = s.Rows.Take(50).ToList();
+            var rowsText = string.Join("\n", shownRows.Select(r => string.Join(" | ", r)));
+            var moreNotice = s.Rows.Count > 50
+                ? $"\n... ({s.Rows.Count - 50} more rows not shown; use read_attachment with fromRow to page through them.)"
+                : "";
+            return $"Sheet: {s.Name} ({s.Rows.Count} rows)\n{headerLine}{rowsText}{moreNotice}";
+        }));
 
     private static string ExtractAttrName(string head)
     {

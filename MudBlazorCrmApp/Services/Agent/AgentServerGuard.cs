@@ -10,17 +10,29 @@ namespace MudBlazorCrmApp.Services.Agent;
 public sealed class AgentServerGuard
 {
     private const int MaxAskHelpCalls = 3;
+    private const int MaxAskAttachmentCalls = 3;
     private const int MaxPagingWalksPerSource = 2;
+    private const string RedactedAttachmentMarker = "[attachment-content-omitted]";
+
+    // Attachment results are redacted before a transcript is persisted. A replayed redacted
+    // result carries no file data, so that one call signature is not seeded; a live (unredacted)
+    // result is seeded normally and still blocks a duplicate re-read within the task.
+    private static readonly HashSet<string> EphemeralAttachmentTools = new(StringComparer.Ordinal)
+    {
+        "list_attachments", "read_attachment", "ask_attachment"
+    };
 
     private readonly HashSet<string> _seenCalls = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _pagingCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenErrors = new(StringComparer.Ordinal);
     private int _askHelpCount;
+    private int _askAttachmentCount;
     private bool _deleteRefused;
 
     public static AgentServerGuard FromTranscript(IReadOnlyList<JsonObject> messages, IReadOnlySet<string> serverToolNames)
     {
         var guard = new AgentServerGuard();
+        var redactedIds = CollectRedactedAttachmentCallIds(messages);
         foreach (var msg in messages)
         {
             var role = TryGetString(msg["role"]);
@@ -30,6 +42,8 @@ public sealed class AgentServerGuard
                 {
                     var name = TryGetString(tc?["function"]?["name"]) ?? "";
                     if (!serverToolNames.Contains(name)) continue;
+                    var id = TryGetString(tc?["id"]) ?? "";
+                    if (EphemeralAttachmentTools.Contains(name) && redactedIds.Contains(id)) continue;
                     var args = TryGetString(tc?["function"]?["arguments"]) ?? "{}";
                     guard.RecordCallSignature(name, args);
                 }
@@ -41,6 +55,20 @@ public sealed class AgentServerGuard
             }
         }
         return guard;
+    }
+
+    private static HashSet<string> CollectRedactedAttachmentCallIds(IReadOnlyList<JsonObject> messages)
+    {
+        var redacted = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var msg in messages)
+        {
+            if (TryGetString(msg["role"]) != "tool") continue;
+            var content = TryGetString(msg["content"]) ?? "";
+            if (!content.Contains(RedactedAttachmentMarker, StringComparison.Ordinal)) continue;
+            var callId = TryGetString(msg["tool_call_id"]);
+            if (!string.IsNullOrEmpty(callId)) redacted.Add(callId);
+        }
+        return redacted;
     }
 
     public static bool IsHowToQuestion(IReadOnlyList<JsonObject> messages)
@@ -64,7 +92,11 @@ public sealed class AgentServerGuard
                 || goal.StartsWith("how to ", StringComparison.OrdinalIgnoreCase)
                 || goal.StartsWith("how can i ", StringComparison.OrdinalIgnoreCase)
                 || goal.StartsWith("چطور ", StringComparison.Ordinal)
-                || goal.StartsWith("چگونه ", StringComparison.Ordinal);
+                || goal.StartsWith("چگونه ", StringComparison.Ordinal)
+                || goal.StartsWith("why ", StringComparison.OrdinalIgnoreCase)
+                || goal.StartsWith("چرا ", StringComparison.Ordinal)
+                || goal.StartsWith("توضیح ", StringComparison.Ordinal)
+                || goal.StartsWith("explain ", StringComparison.OrdinalIgnoreCase);
         }
         return false;
     }
@@ -125,6 +157,13 @@ public sealed class AgentServerGuard
                 return Block($"ask_help limit ({MaxAskHelpCalls}) reached for this task. Answer from what you already retrieved.", repeatGuard: true);
         }
 
+        if (toolName == "ask_attachment")
+        {
+            _askAttachmentCount++;
+            if (_askAttachmentCount > MaxAskAttachmentCalls)
+                return Block($"ask_attachment limit ({MaxAskAttachmentCalls}) reached for this task. Use read_attachment for the remaining rows.", repeatGuard: true);
+        }
+
         if (toolName == "read_data")
         {
             if (_deleteRefused)
@@ -171,6 +210,7 @@ public sealed class AgentServerGuard
     {
         _seenCalls.Add($"{name}:{argsRaw.Trim()}");
         if (name == "ask_help") _askHelpCount++;
+        if (name == "ask_attachment") _askAttachmentCount++;
         if (name == "read_data")
         {
             try

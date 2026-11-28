@@ -84,6 +84,7 @@ public class AppText
         ["AGENT_PERM_PROMPT"] = ("تایید عملیات: {0} ({1})", "Approve action: {0} ({1})"),
         ["AGENT_THINKING"] = ("در حال بررسی...", "Thinking..."),
         ["AGENT_STOPPED"] = ("توسط کاربر متوقف شد.", "Stopped by user."),
+        ["AGENT_STOPPED_ACTIONS"] = ("اقدامات انجام‌شده تا لحظه توقف:", "Actions performed before stopping:"),
         ["AGENT_EMPTY_REPLY"] = ("دستیار پاسخی برنگرداند. لطفاً دوباره تلاش کنید.", "The assistant did not return a reply. Please try again."),
         ["AGENT_CLOSE"] = ("بستن", "Close"),
         ["AGENT_EMPTY_STATE"] = ("می‌توانید درباره صفحه فعلی، جابه‌جایی بین بخش‌ها یا وضعیت CRM سوال بپرسید.", "Ask about the current screen, navigate between pages, or inspect CRM info."),

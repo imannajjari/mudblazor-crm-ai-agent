@@ -353,7 +353,12 @@ public sealed class AgentClientService(
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             run.Close(AgentTaskOutcomeMemory.Stopped);
-            if (run.ChatKey == CurrentChatKey) _entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
+            if (run.ChatKey == CurrentChatKey)
+            {
+                var stopSummary = AgentClientTranscriptHelper.BuildStopSummary(ledger, appText["AGENT_STOPPED_ACTIONS"]);
+                if (stopSummary != null) _entries.Add(new AgentChatEntry("assistant", stopSummary));
+                _entries.Add(new AgentChatEntry("info", appText["AGENT_STOPPED"]));
+            }
         }
         catch (Exception ex)
         {

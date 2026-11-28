@@ -139,6 +139,11 @@ public sealed class SetFieldHandler : IUiToolHandler
         if (!AgentSafetyState.IsProvidedValue(val) && !ctx.Safety.IsUserQuote(delegatedBy))
             return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Placeholder or empty value '{val}' is not allowed. delegatedBy must quote the user's own words from the task goal or their ask_user answers (the bare word 'user' is not evidence)." }), false, null, ctx.CurrentSnapshotJson);
 
+        if (AgentSafetyState.IsSyntheticEmail(val) && !ctx.Safety.IsUserQuote(val))
+        {
+            return new(JsonSerializer.Serialize(new { ok = false, blocked = true, reason = $"Synthetic email domain '{val}' is not allowed. Ask the user for the real value or leave the field blank." }), false, null, ctx.CurrentSnapshotJson);
+        }
+
         var isSensitive = AgentSafetyState.IsSensitiveField(ctx.CurrentSnapshotJson, id);
         var res = await ctx.Host.InvokeDriverStringAsync("setField", ct, id, val);
         var parsedRes = ctx.Host.TryParseNode(res);

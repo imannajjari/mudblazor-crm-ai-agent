@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
@@ -1151,6 +1152,495 @@ public class AgentExtendedTests
             Executions++;
             return Task.FromResult("""{"ok":true,"echo":1}""");
         }
+    }
+
+    // Synthetic placeholder domains are rejected unless the exact value is user evidence.
+
+    [Fact]
+    public async Task SetFieldHandler_BlocksSyntheticEmailDomain_WithoutUserEvidence()
+    {
+        var host = new RecordingUiHost();
+        var safety = new AgentSafetyState();
+        var ctx = new UiToolContext("{}", AgentMode.Manual, [], safety,
+            (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce),
+            (_, _, _) => Task.FromResult("yes"),
+            (_, _, _, _, _) => Task.CompletedTask, host);
+
+        var res = await new SetFieldHandler().ExecuteAsync(
+            JsonDocument.Parse("""{"id":"f_email","value":"parisa.r@example.com"}""").RootElement, ctx, CancellationToken.None);
+
+        Assert.Contains("\"blocked\":true", res.ResultJson);
+        Assert.Contains("Synthetic email domain", res.ResultJson);
+    }
+
+    [Fact]
+    public async Task SetFieldHandler_AllowsSyntheticEmail_WhenUserProvidedIt()
+    {
+        var host = new RecordingUiHost();
+        var safety = new AgentSafetyState();
+        safety.SetUserEvidence("Use parisa.r@example.com for the email");
+        var ctx = new UiToolContext("{}", AgentMode.Manual, [], safety,
+            (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce),
+            (_, _, _) => Task.FromResult("yes"),
+            (_, _, _, _, _) => Task.CompletedTask, host);
+
+        var res = await new SetFieldHandler().ExecuteAsync(
+            JsonDocument.Parse("""{"id":"f_email","value":"parisa.r@example.com"}""").RootElement, ctx, CancellationToken.None);
+
+        Assert.DoesNotContain("\"blocked\":true", res.ResultJson);
+    }
+
+    [Fact]
+    public async Task SetFieldHandler_BlocksSyntheticEmail_EvenWhenDelegatedByUser()
+    {
+        var host = new RecordingUiHost();
+        var safety = new AgentSafetyState();
+        var ctx = new UiToolContext("{}", AgentMode.Manual, [], safety,
+            (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce),
+            (_, _, _) => Task.FromResult("yes"),
+            (_, _, _, _, _) => Task.CompletedTask, host);
+
+        var res = await new SetFieldHandler().ExecuteAsync(
+            JsonDocument.Parse("""{"id":"f_email","value":"parisa.r@example.com","delegatedBy":"user"}""").RootElement, ctx, CancellationToken.None);
+
+        Assert.Contains("\"blocked\":true", res.ResultJson);
+    }
+
+    [Fact]
+    public async Task SetFieldHandler_BlocksSyntheticEmailSubdomainAndTrailingDot()
+    {
+        var safety = new AgentSafetyState();
+        foreach (var email in new[] { "a@sub.example.com", "b@example.com.", "c@example.org", "d@test.com" })
+        {
+            var ctx = new UiToolContext("{}", AgentMode.Manual, [], safety,
+                (_, _, _) => Task.FromResult(PermissionDecision.AllowOnce),
+                (_, _, _) => Task.FromResult("yes"),
+                (_, _, _, _, _) => Task.CompletedTask, new RecordingUiHost());
+            var res = await new SetFieldHandler().ExecuteAsync(
+                JsonDocument.Parse($"{{\"id\":\"f_email\",\"value\":\"{email}\"}}").RootElement, ctx, CancellationToken.None);
+            Assert.Contains("\"blocked\":true", res.ResultJson);
+        }
+    }
+
+    [Fact]
+    public void AgentSafetyState_MarkSaved_KeepsBatchConfirmationForFollowingRecords()
+    {
+        var safety = new AgentSafetyState { HasAttachmentsInTask = true };
+        safety.MarkDirty();
+        safety.MarkFileSaveConfirmed();
+
+        safety.MarkSaved();
+        Assert.False(safety.HasUnsavedChanges);
+        Assert.True(safety.HasAskedFileSaveConfirm);
+
+        // The next record in the same batch must not trigger a second confirmation.
+        safety.MarkDirty();
+        Assert.Null(safety.CheckFileSaveConfirmationNeeded("save"));
+    }
+
+    [Fact]
+    public void AgentServerGuard_IsHowToQuestion_MatchesWhyAndExplain()
+    {
+        var msgs = new List<JsonObject>
+        {
+            new() { ["role"] = "user", ["content"] = "چرا خودت تشخیص دادی example.com?" },
+        };
+        Assert.True(AgentServerGuard.IsHowToQuestion(msgs));
+
+        var msgs2 = new List<JsonObject>
+        {
+            new() { ["role"] = "user", ["content"] = "why did you pick example.com?" },
+        };
+        Assert.True(AgentServerGuard.IsHowToQuestion(msgs2));
+
+        var msgs3 = new List<JsonObject>
+        {
+            new() { ["role"] = "user", ["content"] = "توضیح بده چرا این کار را کردی" },
+        };
+        Assert.True(AgentServerGuard.IsHowToQuestion(msgs3));
+    }
+
+    [Fact]
+    public async Task AgentService_ExplanatoryQuestion_ReceivesHowToTools_NotWriteTools()
+    {
+        var provider = new SequenceLlmProvider("""{"role":"assistant","content":"چرا انجام ندادم"}""");
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var svc = new AgentService(
+            provider,
+            new MemoryCacheRateLimiter(cache),
+            [],
+            Options.Create(new AgentOptions { Enabled = true }),
+            NullLogger<AgentService>.Instance);
+
+        // Goal-wrapped "چرا" question as first user message of a task
+        var wrapped = AgentClientTranscriptHelper.BuildInitialMessages([], "چرا خودت تشخیص دادی example.com?", "{}");
+        var res = await svc.StepAsync(new AgentStepRequestModel { Messages = wrapped }, "why-user", CancellationToken.None);
+
+        Assert.Null(res.Error);
+        Assert.NotNull(provider.LastTools);
+        var toolNames = provider.LastTools!.Select(t => t.GetProperty("function").GetProperty("name").GetString()).ToHashSet();
+        // How-to tools should NOT include set_field, click_action, pick_option etc.
+        Assert.DoesNotContain("set_field", toolNames);
+        Assert.DoesNotContain("click_action", toolNames);
+        Assert.DoesNotContain("pick_option", toolNames);
+        Assert.Contains("read_data", toolNames);
+        Assert.Contains("finish", toolNames);
+        // A data "why" question must still be able to inspect the screen and ask a follow-up.
+        Assert.Contains("scan_screen", toolNames);
+        Assert.Contains("ask_user", toolNames);
+    }
+
+    // ---- Issue 7: FormatSheetsPreview includes headers ----
+
+    [Fact]
+    public void AgentAttachmentService_FormatSheetsPreview_IncludesHeaders()
+    {
+        var sheets = new List<AttachmentSheet>
+        {
+            new("Sheet1", false, ["Name", "Email", "City"], [["Ali", "ali@test.com", "Tehran"], ["Sara", "sara@test.com", "Isfahan"]])
+        };
+        var preview = AgentAttachmentService.FormatSheetsPreview(sheets);
+
+        Assert.Contains("Headers: Name | Email | City", preview);
+        Assert.Contains("Sheet: Sheet1 (2 rows)", preview);
+        Assert.Contains("Ali | ali@test.com | Tehran", preview);
+    }
+
+    [Fact]
+    public void AgentAttachmentService_FormatSheetsPreview_ShowsMoreRowsNotice()
+    {
+        var manyRows = Enumerable.Range(0, 60).Select(i => new[] { $"Row{i}", $"v{i}" }).ToList();
+        var sheets = new List<AttachmentSheet>
+        {
+            new("Sheet1", false, ["A", "B"], manyRows)
+        };
+        var preview = AgentAttachmentService.FormatSheetsPreview(sheets);
+
+        Assert.Contains("Sheet: Sheet1 (60 rows)", preview);
+        Assert.Contains("10 more rows not shown", preview);
+    }
+
+    // Encoding fallback must report the warning outside the data, never inside RawText/CSV cells.
+
+    [Fact]
+    public void AgentAttachmentParser_ParseAndSniff_InvalidUtf8_FallsBackToWindows1256()
+    {
+        var win1256Bytes = new byte[] { 0xCC, 0xC7, 0xC8, 0xC1, 0x2C, 0x41, 0x6C, 0x69 };
+        var parsed = AgentAttachmentParser.ParseAndSniff(".txt", win1256Bytes);
+
+        Assert.Null(parsed.Error);
+        Assert.Contains("Windows-1256", parsed.Summary);
+        Assert.DoesNotContain("encoding-warning", parsed.RawText ?? "");
+    }
+
+    [Fact]
+    public void AgentAttachmentParser_ParseAndSniff_ValidUtf8_NoWarning()
+    {
+        var utf8Bytes = System.Text.Encoding.UTF8.GetBytes("سلام، چطوری؟");
+        var parsed = AgentAttachmentParser.ParseAndSniff(".txt", utf8Bytes);
+
+        Assert.Null(parsed.Error);
+        Assert.Contains("سلام", parsed.RawText ?? "");
+        Assert.DoesNotContain("Windows-1256", parsed.Summary);
+        Assert.DoesNotContain('\ufffd', parsed.RawText ?? "");
+    }
+
+    [Fact]
+    public void AgentAttachmentParser_ParseAndSniff_Csv_WithInvalidUtf8_KeepsWarningOutOfRows()
+    {
+        // Windows-1256 "جابء,Ali" plus a trailing newline; the old marker appended a phantom row.
+        var badUtf8 = new byte[] { 0xCC, 0xC7, 0xC8, 0xC1, 0x2C, 0x41, 0x6C, 0x69, 0x0A };
+        var parsed = AgentAttachmentParser.ParseAndSniff(".csv", badUtf8);
+
+        Assert.Null(parsed.Error);
+        Assert.Contains("Windows-1256", parsed.Summary);
+        var sheet = Assert.Single(parsed.Sheets);
+        Assert.Equal(2, sheet.Headers.Count);
+        Assert.Empty(sheet.Rows);
+        Assert.DoesNotContain("encoding-warning", parsed.RawText ?? "");
+    }
+
+    // ---- Issue 8: classifyRisk does not mark dialog-open Add buttons as save ----
+
+    [Fact]
+    public void AgentToolSchemas_ReadAttachment_DocumentsFromRowAsZeroBased()
+    {
+        var tool = AgentToolSchemas.GetTools()
+            .First(t => t.GetProperty("function").GetProperty("name").GetString() == "read_attachment");
+        var desc = tool.GetProperty("function").GetProperty("description").GetString() ?? "";
+        var fromRowDesc = tool.GetProperty("function").GetProperty("parameters")
+            .GetProperty("properties").GetProperty("fromRow").GetProperty("description").GetString() ?? "";
+
+        Assert.Contains("0-based", desc);
+        Assert.Contains("0-based", fromRowDesc);
+        Assert.Contains("headers", desc.ToLowerInvariant());
+    }
+
+    // ---- Cancelled task keeps the performed actions for the next turn ----
+
+    [Fact]
+    public void AgentClientTranscriptHelper_BuildStopSummary_ListsPerformedActions()
+    {
+        var appText = new MudBlazorCrmApp.Shared.Blazor.Services.AppText();
+        var ledger = new List<string> { "مقداردهی فیلد|Email: «parisa.r»", "کلیک دکمه|Save [save]", "کلیک دکمه|Save [save]" };
+
+        var summary = AgentClientTranscriptHelper.BuildStopSummary(ledger, appText["AGENT_STOPPED_ACTIONS"]);
+
+        Assert.NotNull(summary);
+        Assert.StartsWith(appText["AGENT_STOPPED_ACTIONS"], summary);
+        Assert.Contains("- مقداردهی فیلد|Email", summary);
+        Assert.Single(summary!.Split('\n').Where(l => l.Contains("Save [save]", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void AgentClientTranscriptHelper_BuildStopSummary_ReturnsNullWhenNothingRan()
+    {
+        Assert.Null(AgentClientTranscriptHelper.BuildStopSummary([], "heading"));
+        Assert.Null(AgentClientTranscriptHelper.BuildStopSummary(["  "], "heading"));
+    }
+
+    // ---- Attachment content delivery: sparse XLSX cells, text paging, redacted re-reads ----
+
+    [Fact]
+    public void AgentAttachmentParser_ParseXlsx_PreservesSparseCellColumns()
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            WriteZipEntry(zip, "[Content_Types].xml",
+                """<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>""");
+            WriteZipEntry(zip, "xl/workbook.xml",
+                """<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""");
+            WriteZipEntry(zip, "xl/worksheets/sheet1.xml", """
+                <?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+                  <row r="1">
+                    <c r="A1" t="inlineStr"><is><t>Id</t></is></c>
+                    <c r="B1" t="inlineStr"><is><t>Name</t></is></c>
+                    <c r="C1" t="inlineStr"><is><t>Email</t></is></c>
+                  </row>
+                  <row r="2">
+                    <c r="A2"><v>1</v></c>
+                    <c r="B2" t="inlineStr"><is><t>Ali</t></is></c>
+                  </row>
+                  <row r="3">
+                    <c r="A3"><v>2</v></c>
+                    <c r="C3" t="inlineStr"><is><t>sara@example.org</t></is></c>
+                  </row>
+                </sheetData></worksheet>
+                """);
+        }
+
+        var parsed = AgentAttachmentParser.ParseAndSniff(".xlsx", ms.ToArray());
+
+        Assert.Null(parsed.Error);
+        var sheet = Assert.Single(parsed.Sheets);
+        Assert.Equal(new[] { "Id", "Name", "Email" }, sheet.Headers.ToArray());
+        Assert.Equal(new[] { "1", "Ali", "" }, sheet.Rows[0]);
+        Assert.Equal(new[] { "2", "", "sara@example.org" }, sheet.Rows[1]);
+
+        var rec = new AttachmentRecord("x1", "u1", "c1", "book.xlsx", "Excel", ms.Length, ms.Length, "h",
+            parsed.Summary, DateTime.UtcNow.AddMinutes(10), parsed.Sheets, parsed.RawText, null, null);
+        using var pageDoc = JsonDocument.Parse(AgentAttachmentService.ReadPagedRows(rec, null, 0, 10));
+        var content = pageDoc.RootElement.GetProperty("content").GetString() ?? "";
+
+        Assert.Contains("\"headers\":[\"Id\",\"Name\",\"Email\"]", content);
+        Assert.Contains("sara@example.org", content);
+        Assert.False(pageDoc.RootElement.GetProperty("hasMore").GetBoolean());
+    }
+
+    [Fact]
+    public void AgentAttachmentService_ReadPagedRows_TextPagesByLine()
+    {
+        var rec = new AttachmentRecord("id-text", "u1", "c1", "notes.txt", "Text", 10, 10, "h", "Text",
+            DateTime.UtcNow.AddMinutes(10), [], "line0\nline1\nline2\nline3", null, null);
+
+        using var doc = JsonDocument.Parse(AgentAttachmentService.ReadPagedRows(rec, null, 1, 2));
+        var root = doc.RootElement;
+
+        Assert.True(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(1, root.GetProperty("fromRow").GetInt32());
+        Assert.Equal(2, root.GetProperty("returnedRows").GetInt32());
+        Assert.Equal(4, root.GetProperty("totalRows").GetInt32());
+        Assert.Equal(3, root.GetProperty("nextFromRow").GetInt32());
+        Assert.True(root.GetProperty("hasMore").GetBoolean());
+
+        var content = root.GetProperty("content").GetString() ?? "";
+        Assert.Contains("line1", content);
+        Assert.Contains("line2", content);
+        Assert.DoesNotContain("line0", content);
+        Assert.DoesNotContain("line3", content);
+    }
+
+    [Fact]
+    public void AgentServerGuard_AllowsAttachmentRereadAfterRedactedTranscript()
+    {
+        var attachmentMessages = new List<JsonObject>
+        {
+            new()
+            {
+                ["role"] = "assistant",
+                ["tool_calls"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["id"] = "t1",
+                        ["function"] = new JsonObject { ["name"] = "read_attachment", ["arguments"] = """{"id":"a1"}""" }
+                    }
+                }
+            },
+            new() { ["role"] = "tool", ["tool_call_id"] = "t1", ["content"] = """{"ok":true,"redacted":"[attachment-content-omitted]"}""" }
+        };
+        var guard = AgentServerGuard.FromTranscript(attachmentMessages,
+            new HashSet<string>(StringComparer.Ordinal) { "read_attachment", "read_data" });
+        using var args = JsonDocument.Parse("""{"id":"a1"}""");
+
+        Assert.Null(guard.CheckBeforeExecute("read_attachment", """{"id":"a1"}""", args.RootElement));
+
+        var dataMessages = new List<JsonObject>
+        {
+            new()
+            {
+                ["role"] = "assistant",
+                ["tool_calls"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["id"] = "t2",
+                        ["function"] = new JsonObject { ["name"] = "read_data", ["arguments"] = """{"source":"customers"}""" }
+                    }
+                }
+            }
+        };
+        var dataGuard = AgentServerGuard.FromTranscript(dataMessages,
+            new HashSet<string>(StringComparer.Ordinal) { "read_attachment", "read_data" });
+        using var dataArgs = JsonDocument.Parse("""{"source":"customers"}""");
+
+        Assert.Contains("blocked", dataGuard.CheckBeforeExecute("read_data", """{"source":"customers"}""", dataArgs.RootElement) ?? "");
+    }
+
+    [Fact]
+    public void AgentCellReference_ColumnIndex_HandlesRealAndInvalidReferences()
+    {
+        Assert.Equal(0, AgentCellReference.ColumnIndex("A1"));
+        Assert.Equal(0, AgentCellReference.ColumnIndex("a1"));
+        Assert.Equal(26, AgentCellReference.ColumnIndex("AA10"));
+        Assert.Equal(27, AgentCellReference.ColumnIndex("AB7"));
+        Assert.Equal(-1, AgentCellReference.ColumnIndex(null));
+        Assert.Equal(-1, AgentCellReference.ColumnIndex(""));
+        Assert.Equal(-1, AgentCellReference.ColumnIndex("1"));
+        Assert.Equal(-1, AgentCellReference.ColumnIndex("ZZZZZ1"));
+    }
+
+    [Fact]
+    public void AgentAttachmentParser_ParseXlsx_SkipsOutOfRangeCellsInsteadOfRelocating()
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            WriteZipEntry(zip, "[Content_Types].xml",
+                """<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>""");
+            WriteZipEntry(zip, "xl/workbook.xml",
+                """<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""");
+            WriteZipEntry(zip, "xl/worksheets/sheet1.xml", """
+                <?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+                  <row r="1">
+                    <c r="A1" t="inlineStr"><is><t>Id</t></is></c>
+                    <c r="B1" t="inlineStr"><is><t>Name</t></is></c>
+                  </row>
+                  <row r="2">
+                    <c r="A2"><v>1</v></c>
+                    <c r="XFD2" t="inlineStr"><is><t>FAR_RIGHT</t></is></c>
+                    <c r="ZZZ2" t="inlineStr"><is><t>BAD_REF</t></is></c>
+                  </row>
+                </sheetData></worksheet>
+                """);
+        }
+
+        var parsed = AgentAttachmentParser.ParseAndSniff(".xlsx", ms.ToArray());
+
+        Assert.Null(parsed.Error);
+        var sheet = Assert.Single(parsed.Sheets);
+        Assert.Equal(new[] { "Id", "Name" }, sheet.Headers.ToArray());
+        Assert.Equal(new[] { "1", "" }, sheet.Rows[0]);
+    }
+
+    [Fact]
+    public void AgentAttachmentService_ReadPagedRows_TextHandlesTrailingNewlineAndLoneCr()
+    {
+        var rec = new AttachmentRecord("id-text", "u1", "c1", "notes.txt", "Text", 10, 10, "h", "Text",
+            DateTime.UtcNow.AddMinutes(10), [], "a\r\nb\rc\n", null, null);
+
+        using var doc = JsonDocument.Parse(AgentAttachmentService.ReadPagedRows(rec, null, 0, 10));
+        var root = doc.RootElement;
+        var content = root.GetProperty("content").GetString() ?? "";
+
+        Assert.Equal(3, root.GetProperty("totalRows").GetInt32());
+        Assert.Equal(3, root.GetProperty("returnedRows").GetInt32());
+        Assert.False(root.GetProperty("hasMore").GetBoolean());
+        Assert.Contains("a\nb\nc", content);
+    }
+
+    [Fact]
+    public void AgentAttachmentService_ReadPagedRows_TruncatesOversizedFirstLine()
+    {
+        var rec = new AttachmentRecord("id-long", "u1", "c1", "long.txt", "Text", 10, 10, "h", "Text",
+            DateTime.UtcNow.AddMinutes(10), [], new string('x', 20_000), null, null);
+
+        using var doc = JsonDocument.Parse(AgentAttachmentService.ReadPagedRows(rec, null, 0, 10));
+        var root = doc.RootElement;
+        var content = root.GetProperty("content").GetString() ?? "";
+
+        Assert.True(root.GetProperty("truncated").GetBoolean());
+        Assert.False(root.GetProperty("hasMore").GetBoolean());
+        Assert.True(content.Length < 7_000, $"content was {content.Length} chars");
+    }
+
+    [Fact]
+    public void AgentServerGuard_BlocksDuplicateUnredactedAttachmentCall()
+    {
+        var messages = new List<JsonObject>
+        {
+            new()
+            {
+                ["role"] = "assistant",
+                ["tool_calls"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["id"] = "t1",
+                        ["function"] = new JsonObject { ["name"] = "read_attachment", ["arguments"] = """{"id":"a1"}""" }
+                    }
+                }
+            },
+            new() { ["role"] = "tool", ["tool_call_id"] = "t1", ["content"] = """{"ok":true,"content":"rows"}""" }
+        };
+        var guard = AgentServerGuard.FromTranscript(messages,
+            new HashSet<string>(StringComparer.Ordinal) { "read_attachment" });
+        using var args = JsonDocument.Parse("""{"id":"a1"}""");
+
+        Assert.Contains("blocked", guard.CheckBeforeExecute("read_attachment", """{"id":"a1"}""", args.RootElement) ?? "");
+    }
+
+    [Fact]
+    public void AgentServerGuard_CapsAskAttachmentCalls()
+    {
+        var guard = new AgentServerGuard();
+        for (var i = 1; i <= 3; i++)
+        {
+            using var args = JsonDocument.Parse($"{{\"id\":\"a{i}\"}}");
+            Assert.Null(guard.CheckBeforeExecute("ask_attachment", $"{{\"id\":\"a{i}\"}}", args.RootElement));
+        }
+        using var extra = JsonDocument.Parse("""{"id":"a4"}""");
+        Assert.Contains("limit", guard.CheckBeforeExecute("ask_attachment", """{"id":"a4"}""", extra.RootElement) ?? "");
+    }
+
+    private static void WriteZipEntry(ZipArchive zip, string name, string content)
+    {
+        var entry = zip.CreateEntry(name);
+        using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write(content.Trim());
     }
 
     private sealed class SequenceLlmProvider(params string[] responses) : IAgentLlmProvider

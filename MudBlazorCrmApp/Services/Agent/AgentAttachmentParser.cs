@@ -8,6 +8,7 @@ namespace MudBlazorCrmApp.Services.Agent;
 
 /// <summary>
 /// Validates file magic bytes, image pixel limits, CSV RFC 4180 syntax, and XLSX Zip-Bomb/DTD/table-budget safety.
+/// Text without a BOM is decoded as strict UTF-8 first, then Windows-1256 with an explicit warning.
 /// </summary>
 public static class AgentAttachmentParser
 {
@@ -26,6 +27,11 @@ public static class AgentAttachmentParser
         DtdProcessing = DtdProcessing.Prohibit,
         XmlResolver = null
     };
+
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    static AgentAttachmentParser() =>
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
     public sealed record ParseOutcome(
         string Kind,
@@ -48,14 +54,16 @@ public static class AgentAttachmentParser
         if (HasDisallowedControlBytes(bytes))
             return new("Text", [], null, null, null, "", "The file does not look like plain text.");
 
-        var text = DecodeText(bytes);
+        var (text, encodingWarning) = DecodeText(bytes);
         if (text.Length > MaxExtractedChars) text = text[..MaxExtractedChars];
 
         if (lowExt is ".csv" or ".tsv")
-            return ParseCsv(lowExt, text);
+            return ParseCsv(lowExt, text, encodingWarning);
 
-        var lines = text.Split('\n').Length;
-        return new("Text", [], text, null, null, $"Text: {lines} lines, {text.Length} chars", null);
+        var lines = text.Length == 0 ? 0 : text.Split('\n').Length;
+        var summary = $"Text: {lines} lines, {text.Length} chars";
+        if (encodingWarning != null) summary += $"; encoding warning: {encodingWarning}";
+        return new("Text", [], text, null, null, summary, null);
     }
 
     private static ParseOutcome ParseImage(string ext, byte[] bytes)
@@ -79,7 +87,7 @@ public static class AgentAttachmentParser
         return new("Image", [], null, bytes, mediaType, $"Image ({width}x{height}, {bytes.Length} bytes)", null);
     }
 
-    private static ParseOutcome ParseCsv(string ext, string text)
+    private static ParseOutcome ParseCsv(string ext, string text, string? encodingWarning)
     {
         var sep = ext == ".tsv" ? '\t' : DetectDelimiter(text);
         var records = ReadCsvRecords(text, sep);
@@ -105,8 +113,9 @@ public static class AgentAttachmentParser
             data.Add(arr);
         }
         headers ??= [];
-        return new("Csv", [new AttachmentSheet("Sheet1", false, headers, data)], text, null, null,
-            $"CSV: {data.Count} rows, {headers.Count} columns", null);
+        var summary = $"CSV: {data.Count} rows, {headers.Count} columns";
+        if (encodingWarning != null) summary += $"; encoding warning: {encodingWarning}";
+        return new("Csv", [new AttachmentSheet("Sheet1", false, headers, data)], text, null, null, summary, null);
     }
 
     private static ParseOutcome ParseXlsxSafe(byte[] bytes)
@@ -123,17 +132,9 @@ public static class AgentAttachmentParser
         if (zip.Entries.Any(e => e.FullName.Contains("vbaProject", StringComparison.OrdinalIgnoreCase)))
             return new("Excel", [], null, null, null, "", "Macro-enabled workbooks are not allowed.");
 
-        long totalDeclared = 0;
-        foreach (var entry in zip.Entries)
-        {
-            if (entry.Length < 0 || entry.Length > MaxInflatedBytes)
-                return new("Excel", [], null, null, null, "", "Workbook entry exceeds maximum inflated size.");
-            totalDeclared += entry.Length;
-            if (totalDeclared > MaxInflatedBytes)
-                return new("Excel", [], null, null, null, "", "Workbook exceeds maximum inflated size.");
-            if (entry.Length > RatioCheckFromBytes && (entry.CompressedLength <= 0 || entry.Length / entry.CompressedLength > MaxCompressionRatio))
-                return new("Excel", [], null, null, null, "", "Workbook compression ratio exceeds safety limit.");
-        }
+        var budgetError = ValidateZipBudget(zip);
+        if (budgetError != null)
+            return new("Excel", [], null, null, null, "", budgetError);
 
         long remainingBudget = MaxInflatedBytes;
         var shared = ReadSharedStrings(zip, ref remainingBudget);
@@ -142,26 +143,51 @@ public static class AgentAttachmentParser
         foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("xl/worksheets/sheet", StringComparison.OrdinalIgnoreCase) && e.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Take(50))
         {
             var doc = LoadXmlBounded(entry, ref remainingBudget);
-            var rows = new List<string[]>();
-            foreach (var r in doc.Descendants().Where(x => x.Name.LocalName == "row").Take(MaxRowsPerSheet))
-            {
-                var cells = r.Elements().Where(x => x.Name.LocalName == "c")
-                    .Select(c => ReadCellValue(c, shared))
-                    .Take(MaxColumnsPerRow)
-                    .ToArray();
-                if (tableBudget.TryChargeAllocation(cells.Length) is { } allocErr)
-                    return new("Excel", [], null, null, null, "", allocErr);
-                foreach (var cell in cells)
-                {
-                    if (tableBudget.TryChargeCell(cell) is { } cellErr)
-                        return new("Excel", [], null, null, null, "", cellErr);
-                }
-                rows.Add(cells);
-            }
-            var headers = rows.Count > 0 ? rows[0].ToList() : [];
-            sheets.Add(new AttachmentSheet(Path.GetFileNameWithoutExtension(entry.Name), false, headers, rows.Skip(1).ToList()));
+            var sheet = BuildSheet(Path.GetFileNameWithoutExtension(entry.Name), doc, shared, tableBudget, out var sheetError);
+            if (sheetError != null)
+                return new("Excel", [], null, null, null, "", sheetError);
+            sheets.Add(sheet!);
         }
         return new("Excel", sheets, null, null, null, $"Excel: {sheets.Count} sheet(s)", null);
+    }
+
+    private static string? ValidateZipBudget(ZipArchive zip)
+    {
+        long totalDeclared = 0;
+        foreach (var entry in zip.Entries)
+        {
+            if (entry.Length < 0 || entry.Length > MaxInflatedBytes)
+                return "Workbook entry exceeds maximum inflated size.";
+            totalDeclared += entry.Length;
+            if (totalDeclared > MaxInflatedBytes)
+                return "Workbook exceeds maximum inflated size.";
+            if (entry.Length > RatioCheckFromBytes && (entry.CompressedLength <= 0 || entry.Length / entry.CompressedLength > MaxCompressionRatio))
+                return "Workbook compression ratio exceeds safety limit.";
+        }
+        return null;
+    }
+
+    private static AttachmentSheet? BuildSheet(
+        string name, XDocument doc, List<string> shared, AgentTableBudget budget, out string? error)
+    {
+        error = null;
+        var rows = new List<string[]>();
+        foreach (var r in doc.Descendants().Where(x => x.Name.LocalName == "row").Take(MaxRowsPerSheet))
+        {
+            var cells = ReadRow(r, shared);
+            if (budget.TryChargeAllocation(cells.Length) is { } allocErr) { error = allocErr; return null; }
+            foreach (var cell in cells)
+                if (budget.TryChargeCell(cell) is { } cellErr) { error = cellErr; return null; }
+            rows.Add(cells);
+        }
+
+        var headers = rows.Count > 0 ? rows[0].ToList() : [];
+        var width = Math.Max(headers.Count, rows.Count == 0 ? 0 : rows.Max(r => r.Length));
+        headers.AddRange(Enumerable.Repeat("", Math.Max(0, width - headers.Count)));
+        for (var i = 0; i < rows.Count; i++)
+            if (rows[i].Length < width)
+                rows[i] = [.. rows[i], .. Enumerable.Repeat("", width - rows[i].Length)];
+        return new AttachmentSheet(name, false, headers, rows.Skip(1).ToList());
     }
 
     private static char DetectDelimiter(string text)
@@ -228,12 +254,22 @@ public static class AgentAttachmentParser
         return ctrl * 50 > sampleLen;
     }
 
-    private static string DecodeText(byte[] bytes)
+    private static (string Text, string? Warning) DecodeText(byte[] bytes)
     {
-        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
-        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-        return Encoding.UTF8.GetString(bytes);
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) return (Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2), null);
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) return (Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2), null);
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) return (Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3), null);
+
+        // Try strict UTF-8 first; if it fails, fall back to Windows-1256 (legacy Persian/ANSI CSV).
+        try
+        {
+            return (StrictUtf8.GetString(bytes), null);
+        }
+        catch (DecoderFallbackException)
+        {
+            var win1256 = Encoding.GetEncoding(1256);
+            return (win1256.GetString(bytes), "non-UTF-8 bytes were decoded as Windows-1256; verify the characters");
+        }
     }
 
     private static bool TryReadImageDimensions(string ext, byte[] b, out int width, out int height)
@@ -333,6 +369,34 @@ public static class AgentAttachmentParser
         return doc.Descendants().Where(x => x.Name.LocalName == "si")
             .Select(si => string.Concat(si.Descendants().Where(t => t.Name.LocalName == "t").Select(t => t.Value)))
             .ToList();
+    }
+
+    private static string[] ReadRow(XElement row, List<string> shared)
+    {
+        var cells = new List<string>();
+        foreach (var cell in row.Elements().Where(x => x.Name.LocalName == "c"))
+        {
+            var cellRef = cell.Attribute("r")?.Value;
+            var index = AgentCellReference.ColumnIndex(cellRef);
+            if (!string.IsNullOrEmpty(cellRef))
+            {
+                // A present but unreadable ref must be skipped, not appended at the current
+                // position: that would silently move a far-right value into the wrong column.
+                if (index < 0 || index >= MaxColumnsPerRow) continue;
+            }
+            else
+            {
+                index = cells.Count;
+            }
+
+            if (index >= MaxColumnsPerRow) break;
+            while (cells.Count < index) cells.Add("");
+            var value = ReadCellValue(cell, shared);
+            if (index < cells.Count) cells[index] = value;
+            else cells.Add(value);
+        }
+        while (cells.Count > 0 && string.IsNullOrEmpty(cells[^1])) cells.RemoveAt(cells.Count - 1);
+        return [.. cells];
     }
 
     private static string ReadCellValue(XElement cell, List<string> shared)

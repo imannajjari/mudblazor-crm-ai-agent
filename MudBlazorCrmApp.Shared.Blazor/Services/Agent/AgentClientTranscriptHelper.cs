@@ -103,6 +103,18 @@ public static partial class AgentClientTranscriptHelper
             : $"{summary.TrimEnd()}\n\n---\n**{title}**\n{bullets}";
     }
 
+    /// <summary>
+    /// Assistant-side memory of a cancelled task: the actions it performed before the user
+    /// stopped it. Returns null when nothing ran, so the caller only adds the stop notice.
+    /// </summary>
+    public static string? BuildStopSummary(List<string> ledger, string heading)
+    {
+        var items = ledger.Where(l => !string.IsNullOrWhiteSpace(l)).Distinct(StringComparer.Ordinal).ToList();
+        return items.Count == 0
+            ? null
+            : $"{heading}\n{string.Join("\n", items.Select(i => $"- {i}"))}";
+    }
+
     public static List<AgentClientService.AgentChatEntry> DeserializeHistory(
         string? historyJson,
         string chatKey,

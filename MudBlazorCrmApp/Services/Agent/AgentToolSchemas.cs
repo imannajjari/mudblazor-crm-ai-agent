@@ -10,6 +10,7 @@ public static class AgentToolSchemas
                     fn.TryGetProperty("name", out var n) &&
                     n.GetString() is "read_data" or "ask_help" or "get_help_page" or "search_help"
                         or "lookup_term" or "ask_knowledge" or "scan_menus" or "search_settings"
+                        or "scan_screen" or "read_grid_headers" or "ask_user"
                         or "list_attachments" or "read_attachment" or "ask_attachment" or "finish")
         .ToArray();
 
@@ -357,7 +358,7 @@ public static class AgentToolSchemas
             "type": "function",
             "function": {
               "name": "ask_user",
-              "description": "Ask the user one short clarifying question when a required value or choice is missing.",
+              "description": "Ask the user one short clarifying question when a required value or choice is missing. Provide `options` when the answer should be chosen from a known list; the user can always type another answer. When asking about invalid attachment data, ask for the COMPLETE corrected value in ONE call (e.g. include the full email with domain) — do not ask in two separate steps.",
               "parameters": {
                 "type": "object",
                 "properties": {
@@ -461,14 +462,14 @@ public static class AgentToolSchemas
             "type": "function",
             "function": {
               "name": "read_attachment",
-              "description": "Read paged rows or text from an attached file.",
+              "description": "Read paged rows or text from an attached file. `fromRow` is a 0-based index: data rows for sheets (headers are returned separately and are not counted) and lines for plain text. Returns `fromRow`, `returnedRows`, `totalRows`, `nextFromRow`, and `hasMore`; when `hasMore` is true, call again with `fromRow` set to `nextFromRow`.",
               "parameters": {
                 "type": "object",
                 "properties": {
                   "id": { "type": "string" },
                   "sheet": { "type": "string" },
-                  "fromRow": { "type": "integer" },
-                  "rowCount": { "type": "integer" }
+                  "fromRow": { "type": "integer", "description": "0-based index: data rows for sheets, lines for text. Headers are not counted." },
+                  "rowCount": { "type": "integer", "description": "Maximum items to return (1-200, default 50)." }
                 },
                 "required": ["id"],
                 "additionalProperties": false
