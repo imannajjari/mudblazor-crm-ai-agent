@@ -35,6 +35,35 @@ window.crmAgentDriver = (function () {
         return (text || '').replace(/\s+/g, ' ').trim();
     }
 
+    // Semantic ids: derived from what the user sees, so a re-render keeps the same id for the
+    // same control instead of shifting every positional f1/a1 after it.
+    let lastMaxRows = 15;
+
+    function slugify(text, max) {
+        const s = cleanText(text).replace(/\u200c/g, '').toLowerCase()
+            .replace(/[^\p{L}\p{N}]+/gu, '_')
+            .replace(/^_+|_+$/g, '');
+        return s.slice(0, max || 40).replace(/_+$/, '');
+    }
+
+    function claimId(base, used) {
+        let id = base;
+        for (let n = 2; used.has(id); n++) id = base + '_' + n;
+        used.add(id);
+        return id;
+    }
+
+    // Looks an element up by id; on a miss re-scans the screen once (ids are semantic, so the
+    // same control is found again after a re-render) and retries before giving up.
+    function resolveElement(id) {
+        let el = elementMap.get(id);
+        if (!el || !document.contains(el)) {
+            captureSnapshot(lastMaxRows);
+            el = elementMap.get(id);
+        }
+        return el && document.contains(el) ? el : null;
+    }
+
     function classifyRisk(label) {
         const t = cleanText(label).toLowerCase();
         if (/\b(delete|remove|void)\b/.test(t) || t.includes('حذف')) {
@@ -76,6 +105,8 @@ window.crmAgentDriver = (function () {
     function captureSnapshot(maxRowsParam) {
         elementMap.clear();
         const maxRows = Math.min(50, Math.max(1, Number(maxRowsParam) || 15));
+        lastMaxRows = maxRows;
+        const used = new Set();
         const dialogs = Array.from(document.querySelectorAll('.mud-dialog[role="dialog"]')).filter(isVisible);
         const topDialog = dialogs.length > 0 ? dialogs[dialogs.length - 1] : null;
         const root = topDialog || document.querySelector('.mud-main-content') || document.body;
@@ -83,20 +114,7 @@ window.crmAgentDriver = (function () {
         const headingEl = (topDialog ? topDialog.querySelector('.mud-dialog-title') : null)
             || root.querySelector('h1, h2, h3, .mud-typography-h3, .mud-typography-h4');
 
-        // Tabs
-        const tabs = [];
-        let tabIdx = 1;
-        root.querySelectorAll('.mud-tab').forEach(el => {
-            if (!isVisible(el)) return;
-            const id = 't' + (tabIdx++);
-            elementMap.set(id, el);
-            tabs.push({
-                id,
-                title: cleanText(el.innerText),
-                active: el.classList.contains('mud-tab-active'),
-                hasError: !!el.querySelector('.mud-error-text')
-            });
-        });
+        const tabs = collectTabs(root, used);
 
         // Fields (inputs, selects, autocompletes, date pickers)
         const fields = [];
@@ -107,7 +125,8 @@ window.crmAgentDriver = (function () {
             if (!input) return;
             const labelEl = ctrl.querySelector('label.mud-input-label');
             const label = cleanText(labelEl ? labelEl.innerText : (input.getAttribute('placeholder') || input.getAttribute('aria-label') || ''));
-            const id = 'f' + (fieldIdx++);
+            const fallback = 'field_' + (fieldIdx++);
+            const id = claimId(slugify(input.getAttribute('name') || '') || slugify(label) || fallback, used);
             const isSelect = !!ctrl.closest('.mud-select');
             const isAuto = !!ctrl.closest('.mud-autocomplete');
             const isDate = !!ctrl.closest('.mud-picker');
@@ -133,7 +152,8 @@ window.crmAgentDriver = (function () {
             const input = ctrl.querySelector('input[type="checkbox"]');
             if (!input) return;
             const label = cleanText(ctrl.innerText || input.getAttribute('aria-label') || '');
-            const id = 'f' + (fieldIdx++);
+            const fallback = 'field_' + (fieldIdx++);
+            const id = claimId(slugify(input.getAttribute('name') || '') || slugify(label) || fallback, used);
             elementMap.set(id, input);
             fields.push({
                 id,
@@ -154,7 +174,7 @@ window.crmAgentDriver = (function () {
             if (isExcluded(input)) return;
             const labelEl = input.id ? root.querySelector(`label[for="${input.id}"]`) : null;
             const label = cleanText((labelEl ? labelEl.innerText : '') || input.getAttribute('aria-label') || input.getAttribute('name') || input.id || 'File');
-            const id = 'fi' + (fileIdx++);
+            const id = claimId('file_' + (slugify(label) || 'input' + (fileIdx++)), used);
             elementMap.set(id, input);
             fileInputs.push({
                 id,
@@ -177,12 +197,11 @@ window.crmAgentDriver = (function () {
 
             const allRows = Array.from(table.querySelectorAll('tbody tr'));
             const rows = allRows.slice(0, maxRows).map((tr, rIdx) => {
-                const rowId = 'r' + gridIdx + '_' + (rIdx + 1);
+                const cells = Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText));
+                const key = slugify(cells.find(Boolean) || '', 30) || 'r' + (rIdx + 1);
+                const rowId = claimId('g' + gridIdx + '_' + key, used);
                 elementMap.set(rowId, tr);
-                return {
-                    rowId,
-                    cells: Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText))
-                };
+                return { rowId, cells };
             });
 
             const footerEl = container ? container.querySelector('.mud-table-pagination-caption') : null;
@@ -198,13 +217,13 @@ window.crmAgentDriver = (function () {
 
         // Actions
         const actions = [];
-        let actIdx = 1;
         root.querySelectorAll('button, a.mud-button-root').forEach(btn => {
             if (!isVisible(btn)) return;
             if (btn.closest('.mud-tab')) return;
             const text = cleanText(btn.innerText || btn.getAttribute('title') || btn.getAttribute('aria-label') || '');
             if (!text) return;
-            const id = 'a' + (actIdx++);
+            const prefix = btn.tagName === 'A' ? 'link_' : 'btn_';
+            const id = claimId((btn.id || '').trim() || prefix + (slugify(text) || 'action'), used);
             elementMap.set(id, btn);
             actions.push({
                 id,
@@ -314,7 +333,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function setField(id, value) {
-        const el = elementMap.get(id);
+        const el = resolveElement(id);
         if (!el || !document.contains(el)) {
             return JSON.stringify({ ok: false, error: 'Field id not found in current view: ' + id });
         }
@@ -386,7 +405,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function openCombo(id) {
-        const el = elementMap.get(id);
+        const el = resolveElement(id);
         if (!el || !document.contains(el)) {
             return JSON.stringify({ ok: false, error: 'Combo id not found: ' + id });
         }
@@ -456,7 +475,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function clickAction(id) {
-        const el = elementMap.get(id);
+        const el = resolveElement(id);
         if (!el || !document.contains(el)) {
             return JSON.stringify({ ok: false, error: 'Action id not found: ' + id });
         }
@@ -471,7 +490,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function selectTab(id) {
-        const el = elementMap.get(id);
+        const el = resolveElement(id);
         if (!el || !document.contains(el)) {
             return JSON.stringify({ ok: false, error: 'Tab id not found in current view: ' + id });
         }
@@ -481,7 +500,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function selectGridRow(rowId) {
-        const el = elementMap.get(rowId);
+        const el = resolveElement(rowId);
         if (!el || !document.contains(el)) {
             return JSON.stringify({ ok: false, error: 'Grid row id not found: ' + rowId });
         }
@@ -718,22 +737,26 @@ window.crmAgentDriver = (function () {
         return JSON.stringify({ ok: items.length > 0, items });
     }
 
-    function scanTabs() {
-        const root = getActiveRoot();
+    function collectTabs(root, used) {
         const tabs = [];
-        let idx = 1;
         root.querySelectorAll('.mud-tab').forEach(el => {
             if (!isVisible(el)) return;
-            const id = 't' + (idx++);
+            const title = cleanText(el.innerText);
+            const id = claimId('tab_' + (slugify(title) || 'tab'), used);
             elementMap.set(id, el);
             tabs.push({
                 id,
-                title: cleanText(el.innerText),
+                title,
                 active: el.classList.contains('mud-tab-active'),
                 hasError: !!el.querySelector('.mud-error-text'),
                 disabled: el.classList.contains('mud-disabled')
             });
         });
+        return tabs;
+    }
+
+    function scanTabs() {
+        const tabs = collectTabs(getActiveRoot(), new Set(elementMap.keys()));
         return JSON.stringify({ ok: true, tabs });
     }
 
@@ -928,7 +951,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function uploadFileToInput(id, fileName, base64, contentType) {
-        const el = elementMap.get(id);
+        const el = resolveElement(id);
         const input = el && el.matches && el.matches('input[type="file"]') ? el : el?.querySelector?.('input[type="file"]');
         if (!input || !document.contains(input)) {
             return JSON.stringify({ ok: false, error: 'File input id not found in current snapshot: ' + id });
@@ -951,7 +974,7 @@ window.crmAgentDriver = (function () {
     }
 
     async function rightClick(id) {
-        const el = elementMap.get(id);
+        const el = resolveElement(id);
         if (!el || !document.contains(el)) {
             return JSON.stringify({ ok: false, error: 'Element id not found: ' + id });
         }
