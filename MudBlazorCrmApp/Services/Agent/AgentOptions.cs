@@ -22,6 +22,7 @@ public class AgentOptions
     public int TimeoutSeconds { get; set; } = 90;
     public int MaxProviderAttempts { get; set; } = 3;
     public int ProviderRetryDelayMs { get; set; } = 700;
+    public int MaxStepDurationSeconds { get; set; } = 600;
     public int HistoryDays { get; set; } = 90;
     public string? LoopbackBaseUrl { get; set; }
     public int MaxLoopbackResponseMB { get; set; } = 32;
@@ -63,6 +64,8 @@ public class AgentOptions
             MaxProviderAttempts = 3;
         if (ProviderRetryDelayMs < 0 || ProviderRetryDelayMs > 5000)
             ProviderRetryDelayMs = 700;
+        if (MaxStepDurationSeconds <= 0 || MaxStepDurationSeconds > 1800)
+            MaxStepDurationSeconds = 600;
         if (HistoryDays < 0 || HistoryDays > 3650)
             HistoryDays = 90;
         if (MaxLoopbackResponseMB <= 0 || MaxLoopbackResponseMB > 128)

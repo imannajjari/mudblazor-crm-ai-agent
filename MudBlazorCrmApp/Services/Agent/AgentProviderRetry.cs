@@ -51,6 +51,7 @@ public static class AgentProviderRetry
 
         for (var attempt = 1; ; attempt++)
         {
+            var delayMs = (long)retryDelayMs * attempt;
             try
             {
                 using var request = requestFactory();
@@ -63,6 +64,11 @@ public static class AgentProviderRetry
                 var error = FormatError(response.StatusCode, body, logger);
                 if (!IsRetryable(response.StatusCode) || attempt >= maxAttempts)
                     return new ProviderSendResult(false, response.StatusCode, body, error);
+
+                // A gateway that names its own rate-limit window (Retry-After) gets honoured.
+                var retryAfter = RetryAfterSeconds(response);
+                if (retryAfter > 0)
+                    delayMs = Math.Min(retryAfter * 1000L, 30_000);
 
                 logger.LogInformation("LLM provider attempt {Attempt}/{Max} got {StatusCode}; retrying.",
                     attempt, maxAttempts, (int)response.StatusCode);
@@ -105,14 +111,25 @@ public static class AgentProviderRetry
                 return new ProviderSendResult(false, 0, null, "Model server is unreachable.");
             }
 
+            // Light jitter so concurrent agent users do not hammer the gateway in lockstep.
+            if (delayMs > 0)
+                delayMs += Random.Shared.Next(0, (int)Math.Max(1, delayMs / 4));
+
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds((long)retryDelayMs * attempt), cancellationToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(delayMs), cancellationToken);
             }
             catch (TaskCanceledException)
             {
                 return new ProviderSendResult(false, 0, null, "Model server request was cancelled.");
             }
         }
+    }
+
+    private static int RetryAfterSeconds(HttpResponseMessage response)
+    {
+        // Numeric Retry-After values are parsed into Delta by the HTTP stack.
+        var delta = response.Headers.RetryAfter?.Delta;
+        return delta is { } d && d > TimeSpan.Zero ? (int)Math.Min(d.TotalSeconds, int.MaxValue) : 0;
     }
 }

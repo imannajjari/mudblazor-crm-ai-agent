@@ -53,7 +53,14 @@ public sealed class AgentService(
         var language = httpContext.GetAgentLanguage();
         var isAdmin = httpContext?.User?.IsInRole("Administrator") == true;
         var isHowTo = AgentServerGuard.IsHowToQuestion(parsedMessages);
-        var (systemPrompt, extraNotes) = await BuildInitialContextAsync(parsedMessages, isHowTo, language, totalUsage, options, cancellationToken);
+
+        // Overall wall-clock cap for one /step call: with provider retries, a single step can
+        // otherwise stack 5 LLM calls × (timeout×2 or attempts×backoff) without any deadline.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(options.MaxStepDurationSeconds));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        var stepCt = linked.Token;
+
+        var (systemPrompt, extraNotes) = await BuildInitialContextAsync(parsedMessages, isHowTo, language, totalUsage, options, stepCt);
         var working = new List<JsonObject>(parsedMessages.Count + extraNotes.Count + 1)
         {
             new() { ["role"] = "system", ["content"] = systemPrompt }
@@ -73,8 +80,11 @@ public sealed class AgentService(
 
         for (var hop = 0; hop <= MaxServerHops; hop++)
         {
-            var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, toolContext, prior, timings, cancellationToken);
-            if (hopResult != null) return hopResult;
+            var hopResult = await RunSingleHopAsync(working, request, options, totalUsage, isHowTo, hop, guard, toolContext, prior, timings, stepCt);
+            if (hopResult == null) continue;
+            if (hopResult.Error != null && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                hopResult.Error = "The agent step took too long and was stopped. Try a narrower task.";
+            return hopResult;
         }
 
         AccumulateCounter(totalUsage, usageCounter);
