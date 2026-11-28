@@ -289,7 +289,7 @@ public static class AgentAttachmentParser
             height = 1 + (b[27] | (b[28] << 8) | (b[29] << 16));
             return true;
         }
-        if (chunk == "VP8L" && b.Length >= 25)
+        if (chunk == "VP8L" && b.Length >= 25 && b[20] == 0x2F)
         {
             var bits = BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(21, 4));
             width = (int)(bits & 0x3FFF) + 1;
@@ -298,8 +298,15 @@ public static class AgentAttachmentParser
         }
         if (chunk == "VP8 " && b.Length >= 30)
         {
-            width = BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(26, 2)) & 0x3FFF;
-            height = BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(28, 2)) & 0x3FFF;
+            // Lossy keyframes store width-1/height-1 right after the 9D 01 2A sync code (RFC 6386).
+            var sync = -1;
+            for (var i = 20; i <= 26 && i + 7 <= b.Length; i++)
+            {
+                if (b[i] == 0x9D && b[i + 1] == 0x01 && b[i + 2] == 0x2A) { sync = i; break; }
+            }
+            if (sync < 0) return false;
+            width = (BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(sync + 3, 2)) & 0x3FFF) + 1;
+            height = (BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(sync + 5, 2)) & 0x3FFF) + 1;
             return true;
         }
         return false;
