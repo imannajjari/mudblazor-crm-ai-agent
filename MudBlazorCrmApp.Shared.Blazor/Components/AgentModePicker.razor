@@ -1,9 +1,8 @@
 @using MudBlazorCrmApp.Shared.Blazor.Services.Agent
 @inject AppText L
-@inject AgentClientService Agent
 @* Port of the reference ModePicker.tsx: a dropdown that opens above the composer.
    A hidden native <select data-testid="agent-mode"> stays in sync so the e2e contract
-   (toHaveValue / inputValue on "agent-mode") keeps working. *@
+   (toHaveValue / inputValue on "agent-mode") keeps working. All state arrives as parameters. *@
 
 <div class="agent-mode">
     <button type="button" class="agent-mode__trigger" aria-haspopup="listbox"
@@ -36,9 +35,9 @@
                     </span>
                 </button>
             }
-            @if (Agent.HasAlwaysAllowed)
+            @if (HasAlwaysAllowed)
             {
-                <button type="button" class="agent-mode__clear" @onclick="ClearAlwaysAllowed">
+                <button type="button" class="agent-mode__clear" @onclick="ClearAlwaysAllowedClicked">
                     @L["AGENT_CLEAR_ALWAYS_ALLOW_CHOICES"]
                 </button>
             }
@@ -58,6 +57,8 @@
     [Parameter] public AgentMode Value { get; set; } = AgentMode.Manual;
     [Parameter] public EventCallback<AgentMode> OnValueChanged { get; set; }
     [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool HasAlwaysAllowed { get; set; }
+    [Parameter] public EventCallback OnClearAlwaysAllowed { get; set; }
 
     private bool _open;
     private static readonly AgentMode[] Modes = [AgentMode.Manual, AgentMode.SemiAuto, AgentMode.Auto];
@@ -85,7 +86,10 @@
         }
     }
 
-    private void ClearAlwaysAllowed() => Agent.ClearAlwaysAllowed();
+    private async Task ClearAlwaysAllowedClicked()
+    {
+        if (OnClearAlwaysAllowed.HasDelegate) await OnClearAlwaysAllowed.InvokeAsync();
+    }
 
     private string CaptionFor(AgentMode mode) => mode switch
     {

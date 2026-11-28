@@ -1,8 +1,8 @@
 @using MudBlazorCrmApp.Shared.Blazor.Services.Agent
 @inject AppText L
-@inject AgentClientService Agent
 @* Port of the reference TaskComposer.tsx: a rounded box with a textarea, round attach / mic /
-   send(stop) buttons at the bottom-right, the attachment chips above, and the ModePicker below. *@
+   send(stop) buttons at the bottom-right, the attachment chips above, and the ModePicker below.
+   All state arrives as parameters (no service injection) so the panel stays the single source. *@
 
 <div>
     <div class="agent-composer @(Centered ? "agent-composer--centered" : "agent-composer--docked") agent-composer--with-files"
@@ -12,7 +12,7 @@
             <div class="agent-chips">
                 @foreach (var f in AttachedFiles)
                 {
-                    var stateClass = f.Error != null ? "agent-chip--failed" : (Agent.IsUploadingAttachment ? "agent-chip--uploading" : "");
+                    var stateClass = f.Error != null ? "agent-chip--failed" : (IsUploading ? "agent-chip--uploading" : "");
                     <span class="agent-chip @stateClass" title="@f.FileName" data-testid="agent-attach-chip">
                         @AttachmentIcon(f.FileName)
                         <span class="agent-chip__name">@f.FileName</span>
@@ -66,7 +66,8 @@
             </button>
         }
     </div>
-    <AgentModePicker Value="Agent.Mode" OnValueChanged="ModeChanged" Disabled="IsRunning" />
+    <AgentModePicker Value="Mode" OnValueChanged="ModeChanged" Disabled="IsRunning"
+                     HasAlwaysAllowed="HasAlwaysAllowed" OnClearAlwaysAllowed="OnClearAlwaysAllowed" />
 </div>
 
 @code {
@@ -75,6 +76,9 @@
     [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
     [Parameter] public bool IsRunning { get; set; }
     [Parameter] public bool IsUploading { get; set; }
+    [Parameter] public AgentMode Mode { get; set; } = AgentMode.Manual;
+    [Parameter] public bool HasAlwaysAllowed { get; set; }
+    [Parameter] public EventCallback OnClearAlwaysAllowed { get; set; }
     [Parameter] public bool Centered { get; set; }
     [Parameter] public bool IsListening { get; set; }
     [Parameter] public IReadOnlyList<AttachedFileItem> AttachedFiles { get; set; } = [];

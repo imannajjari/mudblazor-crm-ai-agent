@@ -260,7 +260,7 @@ public sealed class AgentClientService(
         WaitingForUserAnswer = false;
         PendingQuestion = null;
         PendingQuestionOptions = null;
-        _entries.Add(new AgentChatEntry("user", answer, SubType: "answer"));
+        _entries.Add(new AgentChatEntry("user", answer, SubType: AgentChatEntry.SubTypeAnswer));
         NotifyChanged();
         _userAnswerTcs.TrySetResult(answer);
     }
@@ -292,7 +292,7 @@ public sealed class AgentClientService(
         var run = new TaskRunState(CurrentChatKey, _nextTaskSeq++, DateTimeOffset.UtcNow);
         var ledger = new List<string>();
         var priorTurns = _entries.Where(e => e.Kind is "user" or "assistant").TakeLast(MaxPriorTurns).ToList();
-        _entries.Add(new AgentChatEntry("user", goal, SubType: "task"));
+        _entries.Add(new AgentChatEntry("user", goal, SubType: AgentChatEntry.SubTypeTask));
         NotifyChanged();
 
         var messages = new List<string>();
@@ -563,5 +563,10 @@ public sealed class AgentClientService(
     private static string NewChatKey() => "c_" + Guid.NewGuid().ToString("N")[..16];
     private void NotifyChanged() => OnStateChanged?.Invoke();
     public void Dispose() { Stop(); _cts?.Dispose(); }
-    public sealed record AgentChatEntry(string Kind, string Text, bool IsBlocked = false, string? SubType = null);
+    public sealed record AgentChatEntry(string Kind, string Text, bool IsBlocked = false, string? SubType = null)
+    {
+        /// <summary>SubType values distinguishing a task goal from a mid-task user answer.</summary>
+        public const string SubTypeTask = "task";
+        public const string SubTypeAnswer = "answer";
+    }
 }

@@ -111,7 +111,18 @@ public static partial class AgentClientTranscriptHelper
         if (string.IsNullOrWhiteSpace(historyJson)) return [];
         try
         {
-            return JsonSerializer.Deserialize<List<AgentClientService.AgentChatEntry>>(historyJson) ?? [];
+            var entries = JsonSerializer.Deserialize<List<AgentClientService.AgentChatEntry>>(historyJson) ?? [];
+            // Pre-SubType histories: the first user entry of a chat was the task goal,
+            // every later one was an answer to a question — without this backfill they all
+            // render as bold "you asked" task lines.
+            var taskSeen = false;
+            for (var i = 0; i < entries.Count; i++)
+            {
+                if (entries[i].Kind != "user" || entries[i].SubType != null) continue;
+                entries[i] = entries[i] with { SubType = taskSeen ? AgentClientService.AgentChatEntry.SubTypeAnswer : AgentClientService.AgentChatEntry.SubTypeTask };
+                taskSeen = true;
+            }
+            return entries;
         }
         catch (JsonException ex)
         {
