@@ -68,9 +68,11 @@ public sealed class AnthropicAgentLlmProvider(
         {
             return ParseAnthropicResponse(send.Body!, options.MaxTokens, logger);
         }
-        catch (JsonException ex)
+        // Malformed gateway payloads vary (missing fields, non-JSON bodies); never let a
+        // parse failure escape as HTTP 500 — always return a clean provider error.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Anthropic provider returned a non-JSON body.");
+            logger.LogError(ex, "Anthropic provider returned an unreadable body.");
             return new LlmCallResult(null, new AgentUsageModel(), "Model server returned an unreadable response.");
         }
     }

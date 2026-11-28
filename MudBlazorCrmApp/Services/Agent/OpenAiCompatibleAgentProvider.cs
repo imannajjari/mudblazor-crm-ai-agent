@@ -113,13 +113,17 @@ public sealed class OpenAiCompatibleAgentProvider(
             }
 
             var choice = choices[0];
-            var messageEl = choice.GetProperty("message");
+            if (!choice.TryGetProperty("message", out var messageEl) || messageEl.ValueKind != JsonValueKind.Object)
+            {
+                return new LlmCallResult(null, usage, "Model server returned an unreadable response.");
+            }
 
             // A tool call cut off at max_tokens arrives as broken argument JSON; report the
             // truncation to the loop instead of feeding corrupted tool arguments back to the model.
             var finishReason = choice.TryGetProperty("finish_reason", out var fr) ? fr.GetString() : null;
             if (finishReason == "length" &&
-                messageEl.TryGetProperty("tool_calls", out var tcs) && tcs.GetArrayLength() > 0)
+                messageEl.TryGetProperty("tool_calls", out var tcs) &&
+                tcs.ValueKind == JsonValueKind.Array && tcs.GetArrayLength() > 0)
             {
                 logger.LogWarning("Model tool-call output was truncated at max_tokens={MaxTokens}.", options.MaxTokens);
                 return new LlmCallResult(null, usage,
@@ -128,9 +132,11 @@ public sealed class OpenAiCompatibleAgentProvider(
 
             return new LlmCallResult(messageEl.GetRawText(), usage, null);
         }
-        catch (JsonException ex)
+        // Malformed gateway payloads vary (null tool_calls, missing fields, non-JSON bodies);
+        // never let a parse failure escape as HTTP 500 — always return a clean provider error.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Model server returned a non-JSON body.");
+            logger.LogError(ex, "Model server returned an unreadable body.");
             return new LlmCallResult(null, new AgentUsageModel(), "Model server returned an unreadable response.");
         }
     }

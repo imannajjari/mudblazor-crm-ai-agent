@@ -33,6 +33,17 @@ public class AgentProviderRetryTests
         }
     }
 
+    private sealed class FuncHandler(Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> responder) : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(responder(request, cancellationToken));
+        }
+    }
+
     private static (OpenAiCompatibleAgentProvider Provider, SequenceHandler Handler) OpenAiPair(
         HttpStatusCode[] statuses, string[] bodies, AgentOptions? opts = null)
     {
@@ -174,6 +185,8 @@ public class AgentProviderRetryTests
         Assert.Equal(1, handler.Calls);
         Assert.NotNull(result.Error);
         Assert.Contains("cut off by the token limit", result.Error);
+        Assert.Equal(900, result.Usage.InputTokens);   // usage survives for cost accounting
+        Assert.Equal(4096, result.Usage.OutputTokens);
     }
 
     [Fact]
@@ -219,5 +232,95 @@ public class AgentProviderRetryTests
                      HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized, HttpStatusCode.NotFound
                  })
             Assert.False(AgentProviderRetry.IsRetryable(code), code.ToString());
+    }
+
+    [Fact]
+    public async Task OpenAi_HttpTimeout_RetriesUpToTimeoutCap_ThenTimesOut()
+    {
+        var handler = new FuncHandler((_, ct) => throw new TaskCanceledException());
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://example.test/v1/") };
+        var provider = new OpenAiCompatibleAgentProvider(client,
+            Options.Create(new AgentOptions { ApiKey = "sk-test", ProviderRetryDelayMs = 0 }),
+            NullLogger<OpenAiCompatibleAgentProvider>.Instance);
+
+        var result = await provider.CompleteAsync([UserMsg], null, CancellationToken.None);
+
+        Assert.Equal(2, handler.Calls); // MAX_TIMEOUT_ATTEMPTS = 2, fewer than the status cap of 3
+        Assert.Equal("Model server request timed out.", result.Error);
+    }
+
+    [Fact]
+    public async Task OpenAi_UnreachableConnection_RetriesUpToMax_ThenReportsUnreachable()
+    {
+        var handler = new FuncHandler((_, ct) => throw new HttpRequestException("connection refused"));
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://example.test/v1/") };
+        var provider = new OpenAiCompatibleAgentProvider(client,
+            Options.Create(new AgentOptions { ApiKey = "sk-test", ProviderRetryDelayMs = 0 }),
+            NullLogger<OpenAiCompatibleAgentProvider>.Instance);
+
+        var result = await provider.CompleteAsync([UserMsg], null, CancellationToken.None);
+
+        Assert.Equal(3, handler.Calls);
+        Assert.Equal("Model server is unreachable.", result.Error);
+    }
+
+    [Fact]
+    public async Task Anthropic_401_IsNotRetried()
+    {
+        var (provider, handler) = AnthropicPair([HttpStatusCode.Unauthorized], [""]);
+
+        var result = await provider.CompleteAsync([UserMsg], null, CancellationToken.None);
+
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal("Model server rejected the API key.", result.Error);
+    }
+
+    [Fact]
+    public async Task OpenAi_GatewayNullsToolCalls_DoesNotThrow()
+    {
+        // Real gateways (LiteLLM) emit "tool_calls": null and "content": null shapes.
+        const string body = """
+            {"choices":[{"message":{"role":"assistant","content":null,"tool_calls":null,"reasoning_content":"thinking..."},"finish_reason":"length"}]}
+            """;
+        var (provider, handler) = OpenAiPair([HttpStatusCode.OK], [body]);
+
+        var result = await provider.CompleteAsync([UserMsg], null, CancellationToken.None);
+
+        Assert.Equal(1, handler.Calls);
+        Assert.Null(result.Error); // not treated as tool truncation; passed through
+        Assert.Contains("reasoning_content", result.AssistantJson);
+    }
+
+    [Fact]
+    public async Task OpenAi_MalformedResponses_ReturnUnreadableError_NotException()
+    {
+        var (missingMessage, _) = OpenAiPair([HttpStatusCode.OK], ["""{"choices":[{}]}"""]);
+        var r1 = await missingMessage.CompleteAsync([UserMsg], null, CancellationToken.None);
+        Assert.Equal("Model server returned an unreadable response.", r1.Error);
+
+        var (nonJson, _) = OpenAiPair([HttpStatusCode.OK], ["<html>gateway error</html>"]);
+        var r2 = await nonJson.CompleteAsync([UserMsg], null, CancellationToken.None);
+        Assert.Equal("Model server returned an unreadable response.", r2.Error);
+    }
+
+    [Fact]
+    public async Task CancelDuringBackoff_StopsImmediately()
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new FuncHandler((_, ct) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            cts.Cancel(); // stop pressed while the first failed response is being handled
+            return response;
+        });
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://example.test/v1/") };
+        var provider = new OpenAiCompatibleAgentProvider(client,
+            Options.Create(new AgentOptions { ApiKey = "sk-test", ProviderRetryDelayMs = 5000 }),
+            NullLogger<OpenAiCompatibleAgentProvider>.Instance);
+
+        var result = await provider.CompleteAsync([UserMsg], null, cts.Token);
+
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal("Model server request was cancelled.", result.Error);
     }
 }

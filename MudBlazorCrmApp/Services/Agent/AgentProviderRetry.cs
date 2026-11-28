@@ -3,16 +3,6 @@ using System.Net;
 namespace MudBlazorCrmApp.Services.Agent;
 
 /// <summary>
-/// Result of a retried provider HTTP send: status + body on a completed response,
-/// or a user-facing <see cref="Error"/> when every attempt failed.
-/// </summary>
-public sealed record ProviderSendResult(
-    bool Ok,
-    HttpStatusCode StatusCode,
-    string? Body,
-    string? Error);
-
-/// <summary>
 /// Shared retry/backoff plumbing for the LLM providers, mirroring the reference agent
 /// (AnthropicAgentLlmProvider): retryable statuses 429/5xx/529, capped transport retries,
 /// linear backoff of ProviderRetryDelayMs × attempt, and no retry after user cancellation.
@@ -32,6 +22,9 @@ public static class AgentProviderRetry
 
     public static string FormatError(HttpStatusCode code, string? body, ILogger logger)
     {
+        // Gateways sometimes echo request content back in error bodies; keep logs bounded.
+        if (body is { Length: > 500 })
+            body = body[..500] + "…";
         logger.LogWarning("LLM provider returned {StatusCode}: {Body}", (int)code, body);
         return code switch
         {
@@ -91,6 +84,14 @@ public static class AgentProviderRetry
             }
             catch (HttpRequestException ex)
             {
+                // Connection dropped mid-body read surfaces as HttpRequestException with a
+                // cancelled inner task; count it against the timeout cap, not the status cap.
+                var isTimeout = ex.InnerException is TaskCanceledException;
+                if (isTimeout && attempt >= MaxTimeoutAttempts)
+                {
+                    logger.LogWarning("LLM provider connection timed out after {Attempt} attempt(s).", attempt);
+                    return new ProviderSendResult(false, 0, null, "Model server request timed out.");
+                }
                 if (attempt >= maxAttempts)
                 {
                     logger.LogError(ex, "Error calling LLM provider.");
