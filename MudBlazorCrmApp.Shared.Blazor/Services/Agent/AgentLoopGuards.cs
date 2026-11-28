@@ -19,14 +19,19 @@ public static partial class AgentLoopGuards
     [GeneratedRegex(@"\b(please\s+do|go\s+ahead\s+and)\b|همین\s*الان|انجامش\s*بده", RegexOptions.IgnoreCase)]
     private static partial Regex ExplicitOverridePattern();
 
-    [GeneratedRegex(@"((switch|change|move|enable|use|set|turn)\b[^.!?\u060C\u061F\n]{0,40}\b(auto|automatic)\b[^.!?\u060C\u061F\n]{0,20}(mode|state|behavio(u)r)?|حالت\s+(خودکار|auto)\b|\bauto[\s-]*mode\b|(به|با)\s+حالت\s+خودکار)", RegexOptions.IgnoreCase)]
+    // Advice only: the bare phrase "حالت خودکار" as a factual report must not match; a
+    // switch verb must be adjacent (English already requires its verb).
+    [GeneratedRegex(@"((switch|change|move|enable|use|set|turn)\b[^.!?\u060C\u061F\n]{0,40}\b(auto|automatic)\b[^.!?\u060C\u061F\n]{0,20}(mode|state|behavio(u)r)?|حالت\s+(خودکار|auto)\b[^.!?\u060C\u061F\n]{0,12}(را\s+)?(انتخاب|تعویض|سوییچ|تغییر|روشن|فعال|بگذار)\s*(کن|کنید|کنم|کنی|نمایید|نمای|بزنید|بزن)|(به|با)\s+حالت\s+(خودکار|auto)\b)", RegexOptions.IgnoreCase)]
     private static partial Regex ModeAdvicePattern();
 
-    [GeneratedRegex(@"[^.!?\u060C\u061F\n]*((switch|change|move|enable|use|set|turn)\b[^.!?\u060C\u061F\n]{0,40}\b(auto|automatic)\b[^.!?\u060C\u061F\n]{0,20}(mode|state|behavio(u)r)?|حالت\s+(خودکار|auto)\b|\bauto[\s-]*mode\b|(به|با)\s+حالت\s+خودکار)[^.!?\u060C\u061F\n]*[.!?\u060C\u061F\n]*", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"[^.!?\u060C\u061F\n]*((switch|change|move|enable|use|set|turn)\b[^.!?\u060C\u061F\n]{0,40}\b(auto|automatic)\b[^.!?\u060C\u061F\n]{0,20}(mode|state|behavio(u)r)?|حالت\s+(خودکار|auto)\b[^.!?\u060C\u061F\n]{0,12}(را\s+)?(انتخاب|تعویض|سوییچ|تغییر|روشن|فعال|بگذار)\s*(کن|کنید|کنم|کنی|نمایید|نمای|بزنید|بزن)|(به|با)\s+حالت\s+(خودکار|auto)\b)[^.!?\u060C\u061F\n]*[.!?\u060C\u061F\n]*", RegexOptions.IgnoreCase)]
     private static partial Regex ModeAdviceSentencePattern();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceCollapsePattern();
+
+    [GeneratedRegex(@"[,;،؛]\s*(?=[.!؟۔]|\s*$)")]
+    private static partial Regex DanglingSeparatorPattern();
 
     public static bool AdvisesModeSwitch(string? summary) =>
         !string.IsNullOrWhiteSpace(summary) && ModeAdvicePattern().IsMatch(summary);
@@ -35,7 +40,8 @@ public static partial class AgentLoopGuards
     {
         if (string.IsNullOrWhiteSpace(summary)) return string.Empty;
         var stripped = ModeAdviceSentencePattern().Replace(summary, " ");
-        return WhitespaceCollapsePattern().Replace(stripped, " ").Trim();
+        stripped = WhitespaceCollapsePattern().Replace(stripped, " ");
+        return DanglingSeparatorPattern().Replace(stripped, "").Trim();
     }
 
     public static bool IsDeleteTaskGoal(string? goal) =>

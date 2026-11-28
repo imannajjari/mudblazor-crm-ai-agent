@@ -58,6 +58,22 @@ public class AgentPhase5GuardTests
     }
 
     [Fact]
+    public void RepeatTracker_CanonicalizesJsonArgsSoReformattingCannotEvadeCaps()
+    {
+        var tracker = new AgentTaskRepeatTracker();
+        tracker.Record("click_action", """{"id":"x"}""", "fp_a");
+        tracker.Record("click_action", """{  "id" : "x" }""", "fp_a");
+        tracker.Record("click_action", """{"id":"x"}""", "fp_a");
+
+        Assert.NotNull(tracker.PreBlockReason("click_action", """{"id":  "x"}"""));
+
+        tracker.Record("set_field", """{"value":"ب","id":"f"}""", "fp_z");
+        tracker.Record("set_field", """{"id":"f","value":"ب"}""", "fp_z");
+        tracker.Record("set_field", """{"id":"f","value":"ب"}""", "fp_z");
+        Assert.NotNull(tracker.PreBlockReason("set_field", """{"value":"ب","id":"f"}"""));
+    }
+
+    [Fact]
     public void SafetyState_UserQuoteEvidence_MatchesGoalAndAnswersVerbatimOnly()
     {
         var safety = new AgentSafetyState();
@@ -70,6 +86,9 @@ public class AgentPhase5GuardTests
         Assert.False(safety.IsUserQuote("Globex"));
         Assert.False(safety.IsUserQuote("ab"));
         Assert.False(safety.IsUserQuote(null));
+        Assert.False(safety.IsUserQuote("TBDX"));
+        safety.SetUserEvidence("TBDX چیزی نیست");
+        Assert.False(safety.IsUserQuote("TBD"));
 
         safety.Reset();
         Assert.False(safety.IsUserQuote("TBD"));
@@ -107,11 +126,15 @@ public class AgentPhase5GuardTests
         Assert.True(AgentLoopGuards.AdvisesModeSwitch("You should switch to Auto mode to let me finish."));
         Assert.False(AgentLoopGuards.AdvisesModeSwitch("I used the autocomplete field to pick the city."));
         Assert.False(AgentLoopGuards.AdvisesModeSwitch("مشتری آریا ثبت شد."));
+        Assert.False(AgentLoopGuards.AdvisesModeSwitch("حالت خودکار پیامک فعال شد و ذخیره گردید."));
 
         var stripped = AgentLoopGuards.StripModeAdvice("مشتری آریا ثبت شد. لطفاً حالت Auto را انتخاب کنید. فیلدها پر شدند.");
         Assert.DoesNotContain("حالت Auto", stripped, StringComparison.Ordinal);
         Assert.Contains("مشتری آریا ثبت شد", stripped, StringComparison.Ordinal);
         Assert.Contains("فیلدها پر شدند", stripped, StringComparison.Ordinal);
+
+        var oneClause = AgentLoopGuards.StripModeAdvice("کار انجام شد، لطفاً حالت Auto را انتخاب کنید.");
+        Assert.Equal("کار انجام شد", oneClause);
     }
 
     [Fact]

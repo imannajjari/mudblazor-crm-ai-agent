@@ -97,7 +97,8 @@ window.crmAgentDriver = (function () {
             || document.body;
     }
 
-    const SENSITIVE_LABEL_RE = /(password|token|secret|code|key|auth|رمز|عبور|کارت|شناسه)/i;
+    // Letter boundaries so "Author"/"Barcode" are not masked; Persian words need no boundaries.
+    const SENSITIVE_LABEL_RE = /((?<![a-z])(password|token|secret|code|key|auth)(?![a-z])|رمز|عبور|کارت|شناسه)/i;
     function isSensitiveLabel(label) { return SENSITIVE_LABEL_RE.test(label || ''); }
 
     function captureSnapshot(maxRowsParam) {
@@ -135,7 +136,7 @@ window.crmAgentDriver = (function () {
                 id,
                 label: label || id,
                 kind,
-                value: isPassword ? '(hidden)' : (input.value || ''),
+                value: isPassword ? (input.value ? '(hidden)' : '') : (input.value || ''),
                 maxLength: input.maxLength > 0 ? input.maxLength : null,
                 required: input.hasAttribute('required') || ctrl.classList.contains('mud-input-required') || input.getAttribute('aria-required') === 'true' || label.includes('*'),
                 invalid: ctrl.classList.contains('mud-input-error') || input.getAttribute('aria-invalid') === 'true',
@@ -197,7 +198,7 @@ window.crmAgentDriver = (function () {
             const allRows = Array.from(table.querySelectorAll('tbody tr'));
             const rows = allRows.slice(0, maxRows).map((tr, rIdx) => {
                 const rawCells = Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText));
-                const cells = rawCells.map((c, cIdx) => sensitiveCol[cIdx] ? '***' : c);
+                const cells = rawCells.map((c, cIdx) => sensitiveCol[cIdx] && c ? '***' : c);
                 const key = slugify(rawCells.find(Boolean) || '', 30) || 'r' + (rIdx + 1);
                 const rowId = claimId('g' + gridIdx + '_' + key, used);
                 elementMap.set(rowId, tr);
@@ -307,10 +308,24 @@ window.crmAgentDriver = (function () {
         const chunks = [];
         let total = 0;
         let n;
+        // Values in columns whose header looks sensitive must not reach the model via visible text either.
+        const sensColCache = new WeakMap();
+        const sensitiveCell = (td) => {
+            const table = td.closest('table');
+            const tr = td.parentElement;
+            if (!table || !tr) return false;
+            let flags = sensColCache.get(table);
+            if (!flags) {
+                flags = Array.from(table.querySelectorAll('thead th')).map(th => isSensitiveLabel(cleanText(th.innerText)));
+                sensColCache.set(table, flags);
+            }
+            return flags[Array.prototype.indexOf.call(tr.children, td)] === true;
+        };
         while ((n = walker.nextNode())) {
             const s = cleanText(n.nodeValue);
             if (!s) continue;
-            chunks.push(s);
+            const td = n.parentElement.closest('td');
+            chunks.push(td && sensitiveCell(td) ? '***' : s);
             total += s.length + 1;
             if (total >= 30000) break;
         }
@@ -379,7 +394,7 @@ window.crmAgentDriver = (function () {
             await new Promise(r => requestAnimationFrame(r));
             input.blur();
             await waitForSettle(400);
-            return JSON.stringify({ ok: true, id, fieldValue: isPassword ? '(hidden)' : input.value });
+            return JSON.stringify({ ok: true, id, fieldValue: isPassword ? (input.value ? '(hidden)' : '') : input.value });
         }
 
         if (isAuto) {
@@ -395,14 +410,14 @@ window.crmAgentDriver = (function () {
                 input.blur();
                 await waitForSettle(300);
             }
-            return JSON.stringify({ ok: true, id, fieldValue: isPassword ? '(hidden)' : input.value });
+            return JSON.stringify({ ok: true, id, fieldValue: isPassword ? (input.value ? '(hidden)' : '') : input.value });
         }
 
         await new Promise(r => requestAnimationFrame(r));
         input.blur();
 
         await waitForSettle(400);
-        return JSON.stringify({ ok: true, id, fieldValue: isPassword ? '(hidden)' : input.value });
+        return JSON.stringify({ ok: true, id, fieldValue: isPassword ? (input.value ? '(hidden)' : '') : input.value });
     }
 
     async function openCombo(id) {
@@ -721,6 +736,7 @@ window.crmAgentDriver = (function () {
                 restored++;
             }
         }
+        lastSavedFilters = []; // consumed: never re-inject these values into a later task or chat
         if (restored > 0) await waitForSettle(600);
         return JSON.stringify({ ok: true, restored });
     }
@@ -817,9 +833,17 @@ window.crmAgentDriver = (function () {
             clone.querySelectorAll('[data-agent-panel="true"], script, style, input[type="password"]').forEach(el => el.remove());
             clone.querySelectorAll('.mud-input-control').forEach(ctrl => {
                 const lbl = cleanText(ctrl.querySelector('label')?.innerText || '');
-                if (/password|secret|token|apikey|رمز\s*عبور|کلمه\s*عبور/i.test(lbl)) {
+                if (isSensitiveLabel(lbl)) {
                     ctrl.querySelectorAll('input, textarea').forEach(inp => inp.remove());
                 }
+            });
+            clone.querySelectorAll('table').forEach(table => {
+                const ths = table.querySelectorAll('thead th');
+                table.querySelectorAll('tbody tr').forEach(tr => {
+                    Array.from(tr.children).forEach((td, i) => {
+                        if (i < ths.length && isSensitiveLabel(cleanText(ths[i].innerText))) td.textContent = '***';
+                    });
+                });
             });
             const serialized = new XMLSerializer().serializeToString(clone);
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
@@ -1065,6 +1089,15 @@ window.crmAgentDriver = (function () {
                 else if (type === 'password' || isSensitiveLabel(id)) v = '';
                 else v = String(el.value || '').slice(0, 32);
                 parts.push(id + '=' + v);
+            });
+            // Grid content identity: pagination or data changes must move the fingerprint
+            // even when no input changed (otherwise legit "next page" loops get blocked).
+            scope.querySelectorAll('table').forEach((table, tIdx) => {
+                if (tIdx >= 2 || !isVisible(table)) return;
+                Array.from(table.querySelectorAll('tbody tr')).slice(0, 6).forEach((tr, rIdx) => {
+                    const first = Array.from(tr.querySelectorAll('td')).map(td => cleanText(td.innerText)).find(Boolean) || '';
+                    parts.push('r' + tIdx + '_' + rIdx + '=' + first.slice(0, 32));
+                });
             });
             const head = djb2((topDialog ? 'd:' : 'p:') + (window.location.pathname || '') + '|' + title).toString(36);
             const body = djb2(parts.join('&')).toString(36);

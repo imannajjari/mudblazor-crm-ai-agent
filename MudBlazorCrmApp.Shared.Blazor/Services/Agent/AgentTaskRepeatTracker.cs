@@ -88,5 +88,28 @@ public sealed class AgentTaskRepeatTracker
             ? child
             : default;
 
-    private static string CallKey(string name, string argsJson) => name + ":" + argsJson.Trim();
+    // Key arguments canonically (sorted keys, no formatting) so {"id":"x"} and {"id": "x" }
+    // cannot slip past the caps by re-spacing or reordering JSON.
+    private static string CallKey(string name, string argsJson)
+    {
+        var trimmed = argsJson.Trim();
+        try
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            return name + ":" + WriteCanonical(doc.RootElement);
+        }
+        catch (JsonException)
+        {
+            return name + ":" + trimmed;
+        }
+    }
+
+    private static string WriteCanonical(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => "{" + string.Join(",", element.EnumerateObject()
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .Select(p => JsonSerializer.Serialize(p.Name, JsonSerializerOptions.Default) + ":" + WriteCanonical(p.Value))) + "}",
+        JsonValueKind.Array => "[" + string.Join(",", element.EnumerateArray().Select(WriteCanonical)) + "]",
+        _ => element.GetRawText()
+    };
 }

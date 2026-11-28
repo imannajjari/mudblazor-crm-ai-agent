@@ -16,7 +16,9 @@ public sealed partial class AgentSafetyState
     [GeneratedRegex(@"^([a-zA-Z]:\\|/tmp/|/var/|data:[^;]+;base64,)", RegexOptions.IgnoreCase)]
     private static partial Regex FileValuePattern();
 
-    [GeneratedRegex(@"password|secret|token|apikey|رمز\s*عبور|کلمه\s*عبور", RegexOptions.IgnoreCase)]
+    // Kept aligned with the JS snapshot masking regex in agentDriver.js so the ledger never
+    // logs a value the snapshot showed masked.
+    [GeneratedRegex(@"((?<![a-z])(password|token|secret|code|key|auth)(?![a-z])|رمز|عبور|کارت|شناسه)", RegexOptions.IgnoreCase)]
     private static partial Regex SensitiveLabelPattern();
 
     public bool HasUnsavedChanges { get; private set; }
@@ -40,11 +42,21 @@ public sealed partial class AgentSafetyState
     public void AppendUserEvidence(string? text) =>
         _userEvidence = CollapseWhitespace(_userEvidence + "\n" + (text ?? string.Empty));
 
-    /// <summary>True when the text appears verbatim in the goal or the user's ask_user answers of this task.</summary>
+    /// <summary>True when the text appears as a whole fragment in the goal or the user's ask_user answers of this task.</summary>
     public bool IsUserQuote(string? text)
     {
         var quote = CollapseWhitespace(text ?? string.Empty);
-        return quote.Length >= 3 && _userEvidence.Contains(quote, StringComparison.OrdinalIgnoreCase);
+        if (quote.Length < 3) return false;
+        var idx = _userEvidence.IndexOf(quote, StringComparison.OrdinalIgnoreCase);
+        while (idx >= 0)
+        {
+            var cleanBefore = idx == 0 || !char.IsLetterOrDigit(_userEvidence[idx - 1]);
+            var end = idx + quote.Length;
+            var cleanAfter = end >= _userEvidence.Length || !char.IsLetterOrDigit(_userEvidence[end]);
+            if (cleanBefore && cleanAfter) return true;
+            idx = _userEvidence.IndexOf(quote, idx + 1, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
     }
 
     private static string CollapseWhitespace(string s) =>
