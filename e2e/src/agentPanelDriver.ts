@@ -27,12 +27,25 @@ export class AgentPanelDriver {
 
   async loginIfNeeded(email?: string, password?: string): Promise<void> {
     if (!email || !password) return;
-    if (this.page.url().includes('/login') || await this.page.locator('input[type="password"]').isVisible()) {
-      await this.page.locator('input[type="email"], input[name*="Email"]').first().fill(email);
-      await this.page.locator('input[type="password"]').first().fill(password);
-      await this.page.locator('button[type="submit"]').first().click();
-      await this.page.waitForLoadState('networkidle');
+    if (await this.page.getByTestId('agent-open-button').isVisible().catch(() => false)) return;
+    // Wait for the WASM app to boot before deciding (cold start can exceed 30s; without this
+    // wait the login form is not yet rendered and the whole login is silently skipped).
+    const pwd = this.page.locator('input[type="password"]');
+    try {
+      await pwd.waitFor({ state: 'visible', timeout: 20_000 });
+    } catch {
+      if (await this.page.getByTestId('agent-open-button').isVisible().catch(() => false)) return; // already authenticated
+      // Unauthenticated [Authorize] pages render a "Not authorized" view without a login redirect;
+      // go to /login explicitly.
+      await this.page.goto('/login');
+      await pwd.waitFor({ state: 'visible', timeout: 60_000 });
     }
+    // MudBlazor renders the email MudTextField as an unnamed type=text input (no name attr).
+    await this.page.locator('input:not([type="password"]):not([type="checkbox"]):not([type="hidden"])').first().fill(email);
+    await pwd.first().fill(password);
+    await this.page.locator('button[type="submit"]').first().click();
+    // Post-login layout (NavMenu + agent button) can take a while on cold WASM; wait, do not assume networkidle.
+    await this.page.getByTestId('agent-open-button').waitFor({ state: 'visible', timeout: 60_000 }).catch(() => {});
   }
 
   async openCleanManualChat(): Promise<void> {
