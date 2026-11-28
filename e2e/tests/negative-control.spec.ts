@@ -13,6 +13,8 @@ test.describe('Negative control (deliberately failing assertion when executed li
     const spec = 'How many customers exist in the CRM? || contains=__IMPOSSIBLE_NEGATIVE_CONTROL_MARKER__';
     const res = await driver.ask(spec);
     expect(res.status).toBe('Finished');
-    expect(() => driver.assertResult(res, parseAskParam(spec))).toThrow(/__IMPOSSIBLE_NEGATIVE_CONTROL_MARKER__/);
+    // The driver lowercases both sides for contains-checks, so the thrown message carries the
+    // marker lowercased — match case-insensitively.
+    expect(() => driver.assertResult(res, parseAskParam(spec))).toThrow(/__IMPOSSIBLE_NEGATIVE_CONTROL_MARKER__/i);
   });
 });
