@@ -692,6 +692,9 @@ body.mud-application-dark-mode [data-agent-panel] {
     color: var(--agent-muted);
     font-size: 13px;
 }
+/* Inline in the working step-group header row: inherit the toggle's metrics/colour so the
+   row keeps its height and hover still lights the caption and dots. */
+.agent-steps__toggle .agent-working { padding: 0; color: inherit; font-size: inherit; }
 .agent-working__mark { flex: none; overflow: visible; }
 .agent-working__bar {
     fill: var(--agent-muted);

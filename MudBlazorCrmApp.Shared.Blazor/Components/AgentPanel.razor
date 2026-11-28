@@ -120,7 +120,6 @@
                         <AgentLogList @ref="_logList" Views="views" WorkingGroup="workingGroup"
                                       WorkMode="workMode" IsRunning="Agent.IsRunning" />
 
-
                         @if (Agent.LastLedger.Count > 0 || Agent.OpenedLedger.Count > 0)
                         {
                             <details class="agent-notes" data-testid="agent-ledger">
@@ -523,6 +522,8 @@
     private async Task SelectChat(string chatKey)
     {
         _showHistory = false;
+        // _logList is unmounted while the history list is shown, so this is usually a no-op;
+        // the fresh AgentLogList for the loaded chat starts with clean state anyway.
         _logList?.ResetOpenGroups();
         await Agent.LoadChatAsync(chatKey);
     }

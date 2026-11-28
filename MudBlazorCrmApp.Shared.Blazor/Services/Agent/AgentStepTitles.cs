@@ -53,7 +53,9 @@ public static partial class AgentLogViewBuilder
     };
 
     private static ToolMeta ToolMetaFor(string name) =>
-        Tools.TryGetValue(name, out var meta) ? meta : new ToolMeta(AgentWorkingMode.Think, null, null);
+        Tools.TryGetValue(name, out var meta) ? meta : UnknownMeta;
+
+    private static readonly ToolMeta UnknownMeta = new(AgentWorkingMode.Think, null, null);
 
     private static string ToolName(string entryText)
     {
@@ -102,13 +104,16 @@ public static partial class AgentLogViewBuilder
 
     // Language-neutral parse cache: the same "name(args)" text repeats on every re-render of
     // the log; decoding JSON per entry per state change was the hot path on long WASM transcripts.
-    private static readonly ConcurrentDictionary<string, (string Name, Dictionary<string, string?>? Args)> ParseCache =
+    // The args dictionary is handed out read-only so no consumer can poison the shared cache entry.
+    private static readonly ConcurrentDictionary<string, (string Name, IReadOnlyDictionary<string, string?>? Args)> ParseCache =
         new(StringComparer.Ordinal);
 
-    private static (string Name, Dictionary<string, string?>? Args) ParseCall(string entryText)
+    private static (string Name, IReadOnlyDictionary<string, string?>? Args) ParseCall(string entryText)
     {
         if (ParseCache.TryGetValue(entryText, out var hit)) return hit;
-        var result = (ToolName(entryText), ParseArgs(entryText));
+        var parsed = ParseArgs(entryText);
+        var result = (ToolName(entryText), (IReadOnlyDictionary<string, string?>?)parsed?
+            .AsReadOnly() ?? new Dictionary<string, string?>());
         if (ParseCache.Count > 4000) ParseCache.Clear();
         ParseCache[entryText] = result;
         return result;

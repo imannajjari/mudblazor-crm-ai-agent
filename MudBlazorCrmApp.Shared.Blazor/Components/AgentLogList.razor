@@ -113,6 +113,9 @@
     else if (view is AgentStepGroupView group)
     {
         var open = _openStepGroups.Contains(group.Id);
+        // Mutually exclusive with the floating AgentWorkingMark below (IsRunning && !WorkingGroup):
+        // exactly ONE data-testid="agent-working" is ever in the DOM — the e2e runner's
+        // getByTestId must stay strict-mode-safe.
         var isWorkingGroup = WorkingGroup && ReferenceEquals(group, Views[^1]);
         <div class="agent-steps">
             <div class="agent-steps__header"
@@ -127,8 +130,7 @@
                     {
                         @* Must be a real box (not display:contents): the e2e runner
                            polls agent-working visibility to detect the end of a run. *@
-                        <span class="agent-working" data-testid="agent-working"
-                              data-mode="@WorkMode.ToString().ToLowerInvariant()">
+                        <span class="agent-working" data-testid="agent-working">
                             <AgentWorkingContent Mode="WorkMode" />
                         </span>
                     }
